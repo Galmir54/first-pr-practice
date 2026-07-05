@@ -1,6 +1,6 @@
 # First PR Practice
 
-This is a practice repositry for learning Git and GitHub with Claude Code.
+This is a practice repository for learning Git and GitHub with Claude Code.
 
 ## Goal
 
