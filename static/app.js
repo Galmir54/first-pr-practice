@@ -479,6 +479,22 @@ document.getElementById("closeSettings").addEventListener("click", closeSettings
 document.getElementById("addDeviceBtn").addEventListener("click", addDevice);
 document.getElementById("saveTariffBtn").addEventListener("click", saveTariff);
 
+document.querySelectorAll(".section-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".section-tab").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const panelName = btn.dataset.panel;
+    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.add("hidden"));
+    document.getElementById(`panel-${panelName}`).classList.remove("hidden");
+
+    // Canvas-Charts brauchen eine sichtbare (nicht display:none) Fläche, um korrekt
+    // zu zeichnen, daher hier gezielt neu laden/zeichnen statt auf den nächsten Timer zu warten.
+    if (panelName === "consumers") loadOverview().catch(() => {});
+    if (panelName === "phases") pollPhases().catch(() => {});
+    if (panelName === "history") loadHistoryChart().catch(() => {});
+  });
+});
+
 document.getElementById("historyDevice").addEventListener("change", () => loadHistoryChart().catch(() => {}));
 document.querySelectorAll(".range-tab").forEach((btn) => {
   btn.addEventListener("click", () => {

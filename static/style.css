@@ -77,6 +77,34 @@ main {
   padding: 24px 28px 60px;
 }
 
+.section-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.section-tab {
+  padding: 12px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.section-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06231d;
+  font-weight: 600;
+}
+
+.tab-panel.hidden {
+  display: none;
+}
+
 .overview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
