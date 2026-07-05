@@ -169,6 +169,65 @@ main {
   color: var(--danger);
 }
 
+.history-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.history-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.history-controls select {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--card-border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.range-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.range-tab {
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.range-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06231d;
+  font-weight: 600;
+}
+
+#historyChart {
+  width: 100%;
+  height: 280px;
+  display: block;
+}
+
+.history-summary {
+  margin-top: 12px;
+  color: var(--text-dim);
+  font-size: 1rem;
+}
+
 .empty-hint {
   color: var(--text-dim);
   padding: 20px;

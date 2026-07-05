@@ -13,10 +13,11 @@ RANGE_TO_TIMEDELTA = {
 }
 
 # Bucket-Auflösung je Zeitraum, damit die Antwort auch bei hoher Poll-Frequenz klein bleibt.
+# "month" bucket-t auf Tagesebene, damit sich pro Tag ein sinnvoller kWh-Wert berechnen lässt.
 BUCKET_FORMAT = {
     "day": "%Y-%m-%d %H:%M",
     "week": "%Y-%m-%d %H",
-    "month": "%Y-%m-%d %H",
+    "month": "%Y-%m-%d",
 }
 
 

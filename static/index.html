@@ -22,6 +22,20 @@
 
   <div class="section-title">Verbraucher</div>
   <div class="device-grid" id="deviceGrid"></div>
+
+  <div class="section-title">Verlauf</div>
+  <div class="history-card">
+    <div class="history-controls">
+      <select id="historyDevice"></select>
+      <div class="range-tabs">
+        <button class="range-tab active" data-range="day">Tag</button>
+        <button class="range-tab" data-range="week">Woche</button>
+        <button class="range-tab" data-range="month">Monat</button>
+      </div>
+    </div>
+    <canvas id="historyChart"></canvas>
+    <div class="history-summary" id="historySummary"></div>
+  </div>
 </main>
 
 <div class="modal-overlay hidden" id="settingsModal">

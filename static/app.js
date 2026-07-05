@@ -5,6 +5,7 @@ const state = {
   devices: [],
   currentByDevice: {},
   tariff: null,
+  historyRange: "day",
 };
 
 function fmtW(w) {
@@ -62,6 +63,142 @@ function drawSparkline(canvas, values) {
   ctx.strokeStyle = "#37c2a3";
   ctx.lineWidth = 3;
   ctx.stroke();
+}
+
+function drawBigChart(canvas, points, mode) {
+  const ctx = canvas.getContext("2d");
+  const w = (canvas.width = canvas.clientWidth * 2);
+  const h = (canvas.height = canvas.clientHeight * 2);
+  ctx.clearRect(0, 0, w, h);
+
+  const values = points.map((p) => p.value).filter((v) => v !== null && v !== undefined);
+  if (values.length === 0) return;
+
+  const min = mode === "bar" ? 0 : Math.min(...values);
+  const max = Math.max(...values, min + 1);
+  const range = max - min || 1;
+  const padLeft = 70;
+  const padBottom = 40;
+  const plotW = w - padLeft - 10;
+  const plotH = h - padBottom - 20;
+
+  ctx.strokeStyle = "#2a3a4a";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(padLeft, 20);
+  ctx.lineTo(padLeft, plotH + 20);
+  ctx.lineTo(w - 10, plotH + 20);
+  ctx.stroke();
+
+  ctx.fillStyle = "#93a5b5";
+  ctx.font = "22px sans-serif";
+  ctx.fillText(Math.round(max).toString(), 4, 34);
+  ctx.fillText(Math.round(min).toString(), 4, plotH + 20);
+
+  if (mode === "bar") {
+    const slot = plotW / points.length;
+    const barW = slot * 0.65;
+    points.forEach((p, i) => {
+      if (p.value === null || p.value === undefined) return;
+      const x = padLeft + i * slot + (slot - barW) / 2;
+      const barH = ((p.value - min) / range) * plotH;
+      ctx.fillStyle = "#37c2a3";
+      ctx.fillRect(x, plotH + 20 - barH, barW, barH);
+    });
+  } else {
+    ctx.beginPath();
+    let started = false;
+    points.forEach((p, i) => {
+      if (p.value === null || p.value === undefined) return;
+      const x = padLeft + (i / (points.length - 1 || 1)) * plotW;
+      const y = plotH + 20 - ((p.value - min) / range) * plotH;
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.strokeStyle = "#37c2a3";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#93a5b5";
+  ctx.font = "20px sans-serif";
+  const labelIdxs = [0, Math.floor((points.length - 1) / 2), points.length - 1];
+  [...new Set(labelIdxs)].forEach((idx) => {
+    const p = points[idx];
+    if (!p) return;
+    const slotCenter =
+      mode === "bar" ? padLeft + idx * (plotW / points.length) + plotW / points.length / 2 : padLeft + (idx / (points.length - 1 || 1)) * plotW;
+    ctx.fillText(p.label, Math.min(Math.max(slotCenter - 30, 0), w - 60), h - 6);
+  });
+}
+
+function populateHistoryDeviceSelect() {
+  const select = document.getElementById("historyDevice");
+  const prevValue = select.value;
+  select.innerHTML = state.devices.map((d) => `<option value="${d.id}">${d.name}</option>`).join("");
+  if (state.devices.some((d) => String(d.id) === prevValue)) {
+    select.value = prevValue;
+  } else if (state.devices.length > 0) {
+    select.value = String(state.devices[0].id);
+  }
+}
+
+async function loadHistoryChart() {
+  const canvas = document.getElementById("historyChart");
+  const summaryEl = document.getElementById("historySummary");
+  const select = document.getElementById("historyDevice");
+
+  if (!select.value) {
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    summaryEl.textContent = "Kein Gerät ausgewählt.";
+    return;
+  }
+
+  const deviceId = parseInt(select.value, 10);
+  const points = await api(`/api/devices/${deviceId}/history?range=${state.historyRange}`);
+
+  if (points.length === 0) {
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    summaryEl.textContent = "Noch keine Daten für diesen Zeitraum.";
+    return;
+  }
+
+  let series;
+  if (state.historyRange === "month") {
+    series = [];
+    for (let i = 1; i < points.length; i++) {
+      const prevE = points[i - 1].energy_wh_total;
+      const curE = points[i].energy_wh_total;
+      const kwh = prevE !== null && curE !== null && prevE !== undefined && curE !== undefined ? Math.max(0, (curE - prevE) / 1000) : null;
+      series.push({ label: points[i].bucket.slice(5), value: kwh });
+    }
+  } else {
+    series = points.map((p) => ({
+      label: p.bucket.slice(state.historyRange === "day" ? 11 : 5),
+      value: p.power_w,
+    }));
+  }
+
+  if (series.filter((p) => p.value !== null && p.value !== undefined).length < 2) {
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    summaryEl.textContent = "Noch nicht genug Daten für diesen Zeitraum – es sammeln sich mit der Zeit mehr Messwerte.";
+    return;
+  }
+
+  drawBigChart(canvas, series, state.historyRange === "month" ? "bar" : "line");
+
+  const withEnergy = points.filter((p) => p.energy_wh_total !== null && p.energy_wh_total !== undefined);
+  if (withEnergy.length >= 2) {
+    const kwh = Math.max(0, (withEnergy[withEnergy.length - 1].energy_wh_total - withEnergy[0].energy_wh_total) / 1000);
+    const cost = state.tariff ? (kwh * state.tariff.arbeitspreis_ct_kwh) / 100 : null;
+    summaryEl.textContent = `Verbrauch im Zeitraum: ${fmtKwh(kwh)}${cost !== null ? ` · ${fmtEur(cost)}` : ""}`;
+  } else {
+    summaryEl.textContent = "";
+  }
 }
 
 async function loadOverview() {
@@ -154,6 +291,7 @@ async function refreshAll() {
   state.devices = await api("/api/devices");
   await refreshCurrentReadings();
   await loadOverview();
+  populateHistoryDeviceSelect();
 }
 
 // --- Settings modal ---
@@ -238,5 +376,16 @@ document.getElementById("closeSettings").addEventListener("click", closeSettings
 document.getElementById("addDeviceBtn").addEventListener("click", addDevice);
 document.getElementById("saveTariffBtn").addEventListener("click", saveTariff);
 
-refreshAll();
+document.getElementById("historyDevice").addEventListener("change", () => loadHistoryChart().catch(() => {}));
+document.querySelectorAll(".range-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".range-tab").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.historyRange = btn.dataset.range;
+    loadHistoryChart().catch(() => {});
+  });
+});
+
+refreshAll().then(() => loadHistoryChart().catch(() => {}));
 setInterval(refreshAll, REFRESH_MS);
+setInterval(() => loadHistoryChart().catch(() => {}), HISTORY_REFRESH_MS);
