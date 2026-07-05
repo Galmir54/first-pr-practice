@@ -1,0 +1,8 @@
+[Unit]
+Description=Energie-Dashboard Auto-Update (git pull + Neustart bei Änderungen)
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/energie-dashboard
+ExecStart=/home/pi/energie-dashboard/deploy/auto-update.sh

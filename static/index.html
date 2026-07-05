@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Energie-Dashboard</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header>
+  <h1>⚡ Energie-Dashboard</h1>
+  <div class="tabs">
+    <button class="tab active" data-utility="strom">Strom</button>
+    <button class="tab" disabled title="Kommt in einer späteren Ausbaustufe">Wasser</button>
+    <button class="tab" disabled title="Kommt in einer späteren Ausbaustufe">Gas</button>
+  </div>
+  <button class="icon-btn" id="settingsBtn" title="Einstellungen">⚙</button>
+</header>
+
+<main>
+  <div class="overview" id="overview"></div>
+
+  <div class="section-title">Verbraucher</div>
+  <div class="device-grid" id="deviceGrid"></div>
+</main>
+
+<div class="modal-overlay hidden" id="settingsModal">
+  <div class="modal">
+    <div class="close-row">
+      <button class="secondary" id="closeSettings">Schließen ✕</button>
+    </div>
+    <h2>Einstellungen</h2>
+
+    <h3>Tarif (Strom)</h3>
+    <div class="form-row">
+      <input type="number" step="0.01" id="tariffGrundpreis" placeholder="Grundpreis €/Monat" />
+      <input type="number" step="0.01" id="tariffArbeitspreis" placeholder="Arbeitspreis ct/kWh" />
+      <button class="primary" id="saveTariffBtn">Speichern</button>
+    </div>
+
+    <h3>Geräte</h3>
+    <div id="deviceList"></div>
+
+    <h3>Gerät hinzufügen</h3>
+    <div class="form-row">
+      <input type="text" id="newDeviceName" placeholder="Name (z.B. Waschmaschine)" />
+      <select id="newDeviceType">
+        <option value="shelly_plug_s_gen3">Shelly Plug S (Gen3)</option>
+        <option value="shelly_pro_3em">Shelly Pro 3EM (Hauptzähler)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <input type="text" id="newDeviceIp" placeholder="IP-Adresse (z.B. 192.168.1.50)" />
+      <button class="primary" id="addDeviceBtn">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
