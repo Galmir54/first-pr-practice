@@ -55,7 +55,8 @@ def history(device_id: int, range: str = Query("day", pattern="^(day|week|month)
             f"""
             SELECT strftime('{fmt}', ts) AS bucket,
                    AVG(power_w) AS power_w,
-                   MAX(energy_wh_total) AS energy_wh_total
+                   MAX(energy_wh_total) AS energy_wh_total,
+                   MIN(energy_wh_total) AS energy_wh_total_min
             FROM readings
             WHERE device_id = ? AND ts >= ?
             GROUP BY bucket

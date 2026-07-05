@@ -413,6 +413,24 @@ function populateHistoryDeviceSelect() {
   }
 }
 
+// Verbrauch (kWh) für einen Tages-Bucket aus /history?range=month: normalerweise
+// als Differenz zum Vortag, aber für den allerersten Bucket (kein Vortag
+// vorhanden, z.B. am Tag des Trackings-Starts) als Differenz zwischen erster
+// und letzter Messung dieses Tages – sonst bliebe der erste Tag für immer leer.
+function dayKwh(points, i) {
+  const cur = points[i];
+  if (i > 0) {
+    const prevE = points[i - 1].energy_wh_total;
+    const curE = cur.energy_wh_total;
+    if (prevE === null || prevE === undefined || curE === null || curE === undefined) return null;
+    return Math.max(0, (curE - prevE) / 1000);
+  }
+  const minE = cur.energy_wh_total_min;
+  const maxE = cur.energy_wh_total;
+  if (minE === null || minE === undefined || maxE === null || maxE === undefined) return null;
+  return Math.max(0, (maxE - minE) / 1000);
+}
+
 async function loadHistoryChart() {
   const canvas = document.getElementById("historyChart");
   const summaryEl = document.getElementById("historySummary");
@@ -435,13 +453,7 @@ async function loadHistoryChart() {
 
   let series;
   if (state.historyRange === "month") {
-    series = [];
-    for (let i = 1; i < points.length; i++) {
-      const prevE = points[i - 1].energy_wh_total;
-      const curE = points[i].energy_wh_total;
-      const kwh = prevE !== null && curE !== null && prevE !== undefined && curE !== undefined ? Math.max(0, (curE - prevE) / 1000) : null;
-      series.push({ label: points[i].bucket.slice(5), value: kwh });
-    }
+    series = points.map((p, i) => ({ label: p.bucket.slice(5), value: dayKwh(points, i) }));
   } else {
     series = points.map((p) => ({
       label: p.bucket.slice(state.historyRange === "day" ? 11 : 5),
@@ -449,7 +461,9 @@ async function loadHistoryChart() {
     }));
   }
 
-  if (series.filter((p) => p.value !== null && p.value !== undefined).length < 2) {
+  // Ein Balken (Monatsansicht) ist schon aussagekräftig, eine Linie (Tag/Woche) braucht mindestens 2 Punkte.
+  const minPoints = state.historyRange === "month" ? 1 : 2;
+  if (series.filter((p) => p.value !== null && p.value !== undefined).length < minPoints) {
     canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
     summaryEl.textContent = "Noch nicht genug Daten für diesen Zeitraum – es sammeln sich mit der Zeit mehr Messwerte.";
     return;
@@ -457,9 +471,14 @@ async function loadHistoryChart() {
 
   drawBigChart(canvas, series, state.historyRange === "month" ? "bar" : "line");
 
-  const withEnergy = points.filter((p) => p.energy_wh_total !== null && p.energy_wh_total !== undefined);
-  if (withEnergy.length >= 2) {
-    const kwh = Math.max(0, (withEnergy[withEnergy.length - 1].energy_wh_total - withEnergy[0].energy_wh_total) / 1000);
+  // Startwert: der niedrigste Zählerstand im ersten Bucket (nicht dessen Maximalwert),
+  // damit auch ein einzelner Bucket (z.B. erster Tag ohne Vortag) einen Wert ergibt.
+  const first = points[0];
+  const last = points[points.length - 1];
+  const startEnergy = first.energy_wh_total_min ?? first.energy_wh_total;
+  const endEnergy = last.energy_wh_total;
+  if (startEnergy !== null && startEnergy !== undefined && endEnergy !== null && endEnergy !== undefined) {
+    const kwh = Math.max(0, (endEnergy - startEnergy) / 1000);
     const cost = state.tariff ? (kwh * state.tariff.arbeitspreis_ct_kwh) / 100 : null;
     summaryEl.textContent = `Verbrauch im Zeitraum: ${fmtKwh(kwh)}${cost !== null ? ` · ${fmtEur(cost)}` : ""}`;
   } else {
@@ -490,12 +509,11 @@ async function renderCalendar() {
   }
 
   const kwhByDay = {};
-  for (let i = 1; i < points.length; i++) {
+  for (let i = 0; i < points.length; i++) {
     const day = parseInt(points[i].bucket.slice(8, 10), 10);
-    const prevE = points[i - 1].energy_wh_total;
-    const curE = points[i].energy_wh_total;
-    if (prevE !== null && curE !== null && prevE !== undefined && curE !== undefined) {
-      kwhByDay[day] = Math.max(0, (curE - prevE) / 1000);
+    const kwh = dayKwh(points, i);
+    if (kwh !== null) {
+      kwhByDay[day] = kwh;
     }
   }
 
