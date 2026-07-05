@@ -41,8 +41,12 @@ Shelly-Geräte sowie den Stromtarif eintragen.
 | Variable               | Standard          | Bedeutung                          |
 |-------------------------|-------------------|-------------------------------------|
 | `ENERGY_DATA_DIR`        | `./data`          | Ablageort der SQLite-Datenbank      |
-| `ENERGY_POLL_INTERVAL`   | `10` (Sekunden)   | Abfrageintervall der Shelly-Geräte  |
+| `ENERGY_POLL_INTERVAL`   | `2` (Sekunden)    | Abfrageintervall der Shelly-Geräte (bestimmt auch, wie oft der Live-Phasen-Chart neue Werte bekommt) |
 | `ENERGY_HTTP_TIMEOUT`    | `5` (Sekunden)    | Timeout je Shelly-Anfrage           |
+
+Bei vielen Geräten oder wenn der Pi entlasten werden soll, kann `ENERGY_POLL_INTERVAL`
+erhöht werden (z.B. `10`) – der Live-Phasen-Chart aktualisiert sich dann entsprechend
+seltener, da er direkt auf den gespeicherten Messwerten aufbaut.
 
 ## Geplante Erweiterung: Wasser & Gas
 

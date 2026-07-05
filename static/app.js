@@ -1,11 +1,16 @@
 const REFRESH_MS = 7000;
 const HISTORY_REFRESH_MS = 60000;
+const LIVE_PHASE_REFRESH_MS = 2000;
+const MAX_PHASE_POINTS = 90; // 90 * 2s = 3 Minuten Rolling-Fenster
+
+const PHASE_COLORS = { a: "#37c2a3", b: "#e0a83e", c: "#5f9fe0" };
 
 const state = {
   devices: [],
   currentByDevice: {},
   tariff: null,
   historyRange: "day",
+  phaseBuffer: [],
 };
 
 function fmtW(w) {
@@ -134,6 +139,104 @@ function drawBigChart(canvas, points, mode) {
       mode === "bar" ? padLeft + idx * (plotW / points.length) + plotW / points.length / 2 : padLeft + (idx / (points.length - 1 || 1)) * plotW;
     ctx.fillText(p.label, Math.min(Math.max(slotCenter - 30, 0), w - 60), h - 6);
   });
+}
+
+function drawMultiLineChart(canvas, seriesList) {
+  const ctx = canvas.getContext("2d");
+  const w = (canvas.width = canvas.clientWidth * 2);
+  const h = (canvas.height = canvas.clientHeight * 2);
+  ctx.clearRect(0, 0, w, h);
+
+  const allValues = seriesList.flatMap((s) => s.values.filter((v) => v !== null && v !== undefined));
+  if (allValues.length < 2) return;
+
+  const min = Math.min(...allValues, 0);
+  const max = Math.max(...allValues, min + 1);
+  const range = max - min || 1;
+  const padLeft = 70;
+  const plotW = w - padLeft - 10;
+  const plotH = h - 30;
+  const count = Math.max(...seriesList.map((s) => s.values.length));
+
+  ctx.strokeStyle = "#2a3a4a";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(padLeft, 20);
+  ctx.lineTo(padLeft, plotH + 20);
+  ctx.lineTo(w - 10, plotH + 20);
+  ctx.stroke();
+
+  ctx.fillStyle = "#93a5b5";
+  ctx.font = "20px sans-serif";
+  ctx.fillText(Math.round(max).toString(), 4, 34);
+  ctx.fillText(Math.round(min).toString(), 4, plotH + 20);
+
+  seriesList.forEach((series) => {
+    ctx.beginPath();
+    let started = false;
+    series.values.forEach((v, i) => {
+      if (v === null || v === undefined) return;
+      const x = padLeft + (i / (count - 1 || 1)) * plotW;
+      const y = plotH + 20 - ((v - min) / range) * plotH;
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.strokeStyle = series.color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  });
+}
+
+function mainMeterDevice() {
+  return state.devices.find((d) => d.device_type === "shelly_pro_3em") || null;
+}
+
+async function pollPhases() {
+  const canvas = document.getElementById("phaseChart");
+  const legend = document.getElementById("phaseLegend");
+  const meter = mainMeterDevice();
+
+  if (!meter) {
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    state.phaseBuffer = [];
+    legend.innerHTML = `<div class="empty-hint">Kein Hauptzähler (Shelly Pro 3EM) eingerichtet.</div>`;
+    return;
+  }
+
+  let reading;
+  try {
+    reading = await api(`/api/devices/${meter.id}/current`);
+  } catch {
+    return;
+  }
+
+  if (!reading || reading.phase_a_w === null || reading.phase_a_w === undefined) {
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    legend.innerHTML = `<div class="empty-hint">Noch keine Phasen-Messwerte vorhanden.</div>`;
+    return;
+  }
+
+  state.phaseBuffer.push({ a: reading.phase_a_w, b: reading.phase_b_w, c: reading.phase_c_w });
+  if (state.phaseBuffer.length > MAX_PHASE_POINTS) {
+    state.phaseBuffer.shift();
+  }
+
+  drawMultiLineChart(canvas, [
+    { color: PHASE_COLORS.a, values: state.phaseBuffer.map((p) => p.a) },
+    { color: PHASE_COLORS.b, values: state.phaseBuffer.map((p) => p.b) },
+    { color: PHASE_COLORS.c, values: state.phaseBuffer.map((p) => p.c) },
+  ]);
+
+  const last = state.phaseBuffer[state.phaseBuffer.length - 1];
+  legend.innerHTML = `
+    <span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS.a}"></span>Phase A: ${fmtW(last.a)}</span>
+    <span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS.b}"></span>Phase B: ${fmtW(last.b)}</span>
+    <span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS.c}"></span>Phase C: ${fmtW(last.c)}</span>
+  `;
 }
 
 function populateHistoryDeviceSelect() {
@@ -386,6 +489,10 @@ document.querySelectorAll(".range-tab").forEach((btn) => {
   });
 });
 
-refreshAll().then(() => loadHistoryChart().catch(() => {}));
+refreshAll().then(() => {
+  loadHistoryChart().catch(() => {});
+  pollPhases().catch(() => {});
+});
 setInterval(refreshAll, REFRESH_MS);
 setInterval(() => loadHistoryChart().catch(() => {}), HISTORY_REFRESH_MS);
+setInterval(() => pollPhases().catch(() => {}), LIVE_PHASE_REFRESH_MS);

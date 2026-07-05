@@ -216,7 +216,8 @@ main {
   font-weight: 600;
 }
 
-#historyChart {
+#historyChart,
+#phaseChart {
   width: 100%;
   height: 280px;
   display: block;
@@ -226,6 +227,29 @@ main {
   margin-top: 12px;
   color: var(--text-dim);
   font-size: 1rem;
+}
+
+.phase-legend {
+  display: flex;
+  gap: 20px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
 }
 
 .empty-hint {
