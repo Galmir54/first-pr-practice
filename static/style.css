@@ -20,8 +20,16 @@
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
   font-family: var(--font-mono);
   background: var(--bg);
   color: var(--text);
@@ -34,59 +42,61 @@ body {
 }
 
 header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 18px 28px;
+  gap: 8px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--card-border);
   background: linear-gradient(180deg, rgba(34, 211, 238, 0.06), transparent);
 }
 
 .header-title h1 {
-  font-size: 1.4rem;
+  font-size: 1.05rem;
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--sum);
   text-shadow: 0 0 10px rgba(57, 255, 157, 0.5);
 }
 
 .header-title .subtitle {
-  font-size: 0.75rem;
+  font-size: 0.6rem;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  margin-top: 2px;
+  letter-spacing: 0.1em;
+  margin-top: 1px;
 }
 
 .header-meta {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .header-clock {
   text-align: right;
-  font-size: 0.9rem;
+  font-size: 0.7rem;
   color: var(--text-dim);
+  line-height: 1.2;
 }
 
 .header-clock .clock-time {
   color: var(--text);
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: 0.85rem;
 }
 
 .conn-status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
+  gap: 6px;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
 
 .conn-dot {
@@ -133,35 +143,41 @@ header {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   color: var(--text);
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-size: 1rem;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 main {
-  padding: 24px 28px 60px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 16px 10px;
+  display: flex;
+  flex-direction: column;
 }
 
 .section-tabs {
+  flex: 0 0 auto;
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 8px;
   flex-wrap: wrap;
 }
 
 .section-tab {
-  padding: 12px 22px;
-  border-radius: 10px;
+  padding: 6px 16px;
+  border-radius: 8px;
   border: 1px solid var(--card-border);
   background: var(--card-bg);
   color: var(--text-dim);
-  font-size: 0.95rem;
+  font-size: 0.8rem;
   cursor: pointer;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 
 .section-tab.active {
@@ -177,46 +193,60 @@ main {
   cursor: not-allowed;
 }
 
-.tab-panel.hidden {
-  display: none;
+.tab-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+#panel-live {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 /* --- Live toolbar --- */
 .live-toolbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   flex-wrap: wrap;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-  margin-bottom: 20px;
-  font-size: 0.9rem;
+  border-radius: 10px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
 }
 
 .live-toolbar .toolbar-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
 }
 
 .live-toolbar select {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--card-border);
-  border-radius: 8px;
-  padding: 6px 10px;
+  border-radius: 6px;
+  padding: 3px 8px;
   font-family: var(--font-mono);
+  font-size: 0.75rem;
 }
 
 .live-toolbar .tariff-display {
   color: var(--warn);
   font-weight: 700;
+  font-size: 0.75rem;
 }
 
 .toolbar-spacer {
@@ -224,12 +254,12 @@ main {
 }
 
 .btn-hud {
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-size: 0.85rem;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   cursor: pointer;
   background: transparent;
   font-family: var(--font-mono);
@@ -252,30 +282,27 @@ main {
 
 /* --- Live-Tab: Phasen + Chart --- */
 .live-grid {
-  display: grid;
-  grid-template-columns: minmax(260px, 340px) 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-@media (max-width: 800px) {
-  .live-grid {
-    grid-template-columns: 1fr;
-  }
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .phase-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
 
 .phase-card {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-left: 4px solid var(--l1);
-  border-radius: var(--radius);
-  padding: 16px;
+  border-left: 3px solid var(--l1);
+  border-radius: 10px;
+  padding: 6px 10px;
 }
 
 .phase-card.l2 {
@@ -287,11 +314,11 @@ main {
 }
 
 .phase-card .phase-label {
-  font-size: 0.8rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--l1);
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
 .phase-card.l2 .phase-label {
@@ -303,90 +330,101 @@ main {
 }
 
 .phase-card .phase-power {
-  font-size: 2.4rem;
+  font-size: 1.4rem;
   font-weight: 700;
   line-height: 1;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
 
 .phase-card .phase-power .unit {
-  font-size: 1.1rem;
+  font-size: 0.8rem;
   color: var(--text-dim);
-  margin-left: 4px;
+  margin-left: 3px;
 }
 
 .phase-metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: 4px;
   border-top: 1px solid var(--card-border);
-  padding-top: 10px;
+  padding-top: 4px;
 }
 
 .phase-metrics .metric .metric-label {
-  font-size: 0.65rem;
+  font-size: 0.55rem;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
 }
 
 .phase-metrics .metric .metric-value {
-  font-size: 0.95rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
 .chart-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  padding: 18px;
+  border-radius: 10px;
+  padding: 8px 12px;
 }
 
 .chart-card .chart-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
-  font-size: 0.85rem;
+  margin-bottom: 4px;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: var(--text-dim);
 }
 
 .chart-legend {
   display: flex;
-  gap: 16px;
+  gap: 12px;
 }
 
 .chart-legend .legend-item {
   font-weight: 400;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
+}
+
+.chart-card canvas {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* --- Kennzahlen-Leiste --- */
 .stat-bar {
+  flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
 }
 
 .stat-bar .stat-cell {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  padding: 16px;
+  border-radius: 10px;
+  padding: 6px 12px;
 }
 
 .stat-bar .stat-cell .label {
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
 }
 
 .stat-bar .stat-cell .value {
-  font-size: 1.6rem;
+  font-size: 1.15rem;
   font-weight: 700;
 }
 
@@ -408,8 +446,8 @@ main {
 
 .stat-bar .stat-cell .sub {
   color: var(--text-dim);
-  font-size: 0.75rem;
-  margin-top: 4px;
+  font-size: 0.6rem;
+  margin-top: 2px;
 }
 
 .overview {
@@ -554,10 +592,14 @@ main {
   font-weight: 600;
 }
 
-#historyChart,
-#phaseChart {
+#historyChart {
   width: 100%;
   height: 280px;
+  display: block;
+}
+
+#phaseChart {
+  width: 100%;
   display: block;
 }
 
