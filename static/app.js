@@ -489,8 +489,8 @@ document.querySelectorAll(".section-tab").forEach((btn) => {
 
     // Canvas-Charts brauchen eine sichtbare (nicht display:none) Fläche, um korrekt
     // zu zeichnen, daher hier gezielt neu laden/zeichnen statt auf den nächsten Timer zu warten.
+    if (panelName === "overview") pollPhases().catch(() => {});
     if (panelName === "consumers") loadOverview().catch(() => {});
-    if (panelName === "phases") pollPhases().catch(() => {});
     if (panelName === "history") loadHistoryChart().catch(() => {});
   });
 });

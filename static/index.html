@@ -21,23 +21,21 @@
   <div class="section-tabs">
     <button class="section-tab active" data-panel="overview">Übersicht</button>
     <button class="section-tab" data-panel="consumers">Verbraucher</button>
-    <button class="section-tab" data-panel="phases">Live-Phasen</button>
     <button class="section-tab" data-panel="history">Verlauf</button>
   </div>
 
   <div class="tab-panel" id="panel-overview">
     <div class="overview" id="overview"></div>
-  </div>
 
-  <div class="tab-panel hidden" id="panel-consumers">
-    <div class="device-grid" id="deviceGrid"></div>
-  </div>
-
-  <div class="tab-panel hidden" id="panel-phases">
+    <div class="section-title">Live-Phasen (Hauptzähler, alle 2s)</div>
     <div class="history-card">
       <canvas id="phaseChart"></canvas>
       <div class="phase-legend" id="phaseLegend"></div>
     </div>
+  </div>
+
+  <div class="tab-panel hidden" id="panel-consumers">
+    <div class="device-grid" id="deviceGrid"></div>
   </div>
 
   <div class="tab-panel hidden" id="panel-history">
