@@ -27,13 +27,15 @@ CREATE TABLE IF NOT EXISTS readings (
     energy_wh_total REAL,
     phase_a_w REAL,
     phase_b_w REAL,
-    phase_c_w REAL
+    phase_c_w REAL,
+    phase_meta TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_readings_device_ts ON readings(device_id, ts);
 
 CREATE TABLE IF NOT EXISTS tariffs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     utility_type TEXT NOT NULL DEFAULT 'strom',
+    name TEXT,
     grundpreis_monat REAL NOT NULL,
     arbeitspreis_ct_kwh REAL NOT NULL,
     valid_from TEXT NOT NULL,
@@ -70,11 +72,23 @@ def db_cursor(commit: bool = False):
             cur.close()
 
 
+def _ensure_column(cur: sqlite3.Cursor, table: str, column: str, column_def: str) -> None:
+    cur.execute(f"PRAGMA table_info({table})")
+    existing = {row["name"] for row in cur.fetchall()}
+    if column not in existing:
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
+
+
 def init_db() -> None:
     conn = get_conn()
     conn.executescript(SCHEMA_SQL)
     conn.commit()
     with db_cursor(commit=True) as cur:
+        # Nachträglich hinzugekommene Spalten: CREATE TABLE IF NOT EXISTS legt sie bei
+        # bereits existierenden Datenbanken (z.B. auf dem Pi) nicht automatisch an.
+        _ensure_column(cur, "readings", "phase_meta", "TEXT")
+        _ensure_column(cur, "tariffs", "name", "TEXT")
+
         cur.execute("SELECT COUNT(*) AS c FROM tariffs")
         if cur.fetchone()["c"] == 0:
             cur.execute(

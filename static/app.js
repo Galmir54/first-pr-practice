@@ -1,9 +1,10 @@
 const REFRESH_MS = 7000;
 const HISTORY_REFRESH_MS = 60000;
-const LIVE_PHASE_REFRESH_MS = 2000;
-const MAX_PHASE_POINTS = 90; // 90 * 2s = 3 Minuten Rolling-Fenster
+const DEFAULT_LIVE_INTERVAL_MS = 2000;
+const MAX_PHASE_POINTS = 90; // Anzahl Messpunkte im Rolling-Fenster, unabhängig vom gewählten Intervall
 
-const PHASE_COLORS = { a: "#37c2a3", b: "#e0a83e", c: "#5f9fe0" };
+const PHASE_COLORS = { a: "#22d3ee", b: "#a78bfa", c: "#ff8a5c", sum: "#39ff9d" };
+const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 const state = {
   devices: [],
@@ -11,7 +12,11 @@ const state = {
   tariff: null,
   historyRange: "day",
   phaseBuffer: [],
+  liveIntervalMs: DEFAULT_LIVE_INTERVAL_MS,
+  paused: false,
 };
+
+let liveTimer = null;
 
 function fmtW(w) {
   if (w === null || w === undefined) return "–";
@@ -37,10 +42,10 @@ async function api(path, options) {
   return res.json();
 }
 
-function isStale(reading) {
+function isStale(reading, thresholdMs = REFRESH_MS * 4) {
   if (!reading || !reading.ts) return true;
   const ts = new Date(reading.ts).getTime();
-  return Date.now() - ts > REFRESH_MS * 4;
+  return Date.now() - ts > thresholdMs;
 }
 
 function drawSparkline(canvas, values) {
@@ -65,7 +70,7 @@ function drawSparkline(canvas, values) {
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
-  ctx.strokeStyle = "#37c2a3";
+  ctx.strokeStyle = "#39ff9d";
   ctx.lineWidth = 3;
   ctx.stroke();
 }
@@ -87,7 +92,7 @@ function drawBigChart(canvas, points, mode) {
   const plotW = w - padLeft - 10;
   const plotH = h - padBottom - 20;
 
-  ctx.strokeStyle = "#2a3a4a";
+  ctx.strokeStyle = "#163044";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(padLeft, 20);
@@ -95,8 +100,8 @@ function drawBigChart(canvas, points, mode) {
   ctx.lineTo(w - 10, plotH + 20);
   ctx.stroke();
 
-  ctx.fillStyle = "#93a5b5";
-  ctx.font = "22px sans-serif";
+  ctx.fillStyle = "#6f93a8";
+  ctx.font = "22px Consolas, monospace";
   ctx.fillText(Math.round(max).toString(), 4, 34);
   ctx.fillText(Math.round(min).toString(), 4, plotH + 20);
 
@@ -107,7 +112,7 @@ function drawBigChart(canvas, points, mode) {
       if (p.value === null || p.value === undefined) return;
       const x = padLeft + i * slot + (slot - barW) / 2;
       const barH = ((p.value - min) / range) * plotH;
-      ctx.fillStyle = "#37c2a3";
+      ctx.fillStyle = "#39ff9d";
       ctx.fillRect(x, plotH + 20 - barH, barW, barH);
     });
   } else {
@@ -124,13 +129,13 @@ function drawBigChart(canvas, points, mode) {
         ctx.lineTo(x, y);
       }
     });
-    ctx.strokeStyle = "#37c2a3";
+    ctx.strokeStyle = "#39ff9d";
     ctx.lineWidth = 4;
     ctx.stroke();
   }
 
-  ctx.fillStyle = "#93a5b5";
-  ctx.font = "20px sans-serif";
+  ctx.fillStyle = "#6f93a8";
+  ctx.font = "20px Consolas, monospace";
   const labelIdxs = [0, Math.floor((points.length - 1) / 2), points.length - 1];
   [...new Set(labelIdxs)].forEach((idx) => {
     const p = points[idx];
@@ -158,7 +163,7 @@ function drawMultiLineChart(canvas, seriesList) {
   const plotH = h - 30;
   const count = Math.max(...seriesList.map((s) => s.values.length));
 
-  ctx.strokeStyle = "#2a3a4a";
+  ctx.strokeStyle = "#163044";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(padLeft, 20);
@@ -166,10 +171,20 @@ function drawMultiLineChart(canvas, seriesList) {
   ctx.lineTo(w - 10, plotH + 20);
   ctx.stroke();
 
-  ctx.fillStyle = "#93a5b5";
-  ctx.font = "20px sans-serif";
-  ctx.fillText(Math.round(max).toString(), 4, 34);
-  ctx.fillText(Math.round(min).toString(), 4, plotH + 20);
+  ctx.fillStyle = "#6f93a8";
+  ctx.font = "20px Consolas, monospace";
+  const gridLines = 4;
+  for (let i = 0; i <= gridLines; i++) {
+    const frac = i / gridLines;
+    const value = max - frac * range;
+    const y = 20 + frac * plotH;
+    ctx.strokeStyle = "rgba(22, 48, 68, 0.6)";
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(w - 10, y);
+    ctx.stroke();
+    ctx.fillText(Math.round(value).toString(), 4, y + 6);
+  }
 
   seriesList.forEach((series) => {
     ctx.beginPath();
@@ -195,15 +210,80 @@ function mainMeterDevice() {
   return state.devices.find((d) => d.device_type === "shelly_pro_3em") || null;
 }
 
-async function pollPhases() {
+// --- Kopfzeile: Uhr, Verbindungsstatus, Vollbild ---
+
+function updateClock() {
+  const now = new Date();
+  document.getElementById("clockTime").textContent = now.toLocaleTimeString("de-DE");
+  document.getElementById("clockDate").textContent = now.toLocaleDateString("de-DE");
+}
+
+function setConnStatus(connected, label) {
+  const dot = document.getElementById("connDot");
+  const text = document.getElementById("connLabel");
+  dot.classList.toggle("offline", !connected);
+  text.textContent = label;
+}
+
+function updateConnStatusFromReading(reading) {
+  const threshold = Math.max(state.liveIntervalMs * 3, 15000);
+  const ok = !isStale(reading, threshold);
+  setConnStatus(ok, ok ? "Verbunden" : "Getrennt");
+}
+
+document.getElementById("fullscreenBtn").addEventListener("click", () => {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen();
+  }
+});
+
+// --- Live-Tab: Phasen-Karten + kombinierter Chart ---
+
+function redrawPhaseChartOnly() {
   const canvas = document.getElementById("phaseChart");
-  const legend = document.getElementById("phaseLegend");
+  drawMultiLineChart(canvas, [
+    { color: PHASE_COLORS.a, values: state.phaseBuffer.map((p) => p.a) },
+    { color: PHASE_COLORS.b, values: state.phaseBuffer.map((p) => p.b) },
+    { color: PHASE_COLORS.c, values: state.phaseBuffer.map((p) => p.c) },
+    { color: PHASE_COLORS.sum, values: state.phaseBuffer.map((p) => p.sum) },
+  ]);
+}
+
+function updatePhaseCards(reading) {
+  let meta = null;
+  try {
+    meta = reading.phase_meta ? JSON.parse(reading.phase_meta) : null;
+  } catch {
+    meta = null;
+  }
+
+  const phases = [
+    { key: "a", power: reading.phase_a_w },
+    { key: "b", power: reading.phase_b_w },
+    { key: "c", power: reading.phase_c_w },
+  ];
+
+  phases.forEach(({ key, power }) => {
+    const card = document.querySelector(`.phase-card[data-phase="${key}"]`);
+    if (!card) return;
+    card.querySelector(".phase-power .value").textContent = power !== null && power !== undefined ? Math.round(power) : "–";
+    const m = meta ? meta[key] : null;
+    card.querySelector('[data-field="voltage"]').textContent = m && m.voltage != null ? `${m.voltage.toFixed(1)} V` : "–";
+    card.querySelector('[data-field="current"]').textContent = m && m.current != null ? `${m.current.toFixed(2)} A` : "–";
+    card.querySelector('[data-field="pf"]').textContent = m && m.pf != null ? m.pf.toFixed(3) : "–";
+    card.querySelector('[data-field="freq"]').textContent = m && m.freq != null ? `${m.freq.toFixed(2)} Hz` : "–";
+  });
+}
+
+async function pollPhases() {
   const meter = mainMeterDevice();
 
   if (!meter) {
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
     state.phaseBuffer = [];
-    legend.innerHTML = `<div class="empty-hint">Kein Hauptzähler (Shelly Pro 3EM) eingerichtet.</div>`;
+    document.getElementById("phaseChart").getContext("2d").clearRect(0, 0, 1, 1);
+    updateConnStatusFromReading(null);
     return;
   }
 
@@ -214,30 +294,113 @@ async function pollPhases() {
     return;
   }
 
-  if (!reading || reading.phase_a_w === null || reading.phase_a_w === undefined) {
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
-    legend.innerHTML = `<div class="empty-hint">Noch keine Phasen-Messwerte vorhanden.</div>`;
+  updateConnStatusFromReading(reading);
+  if (!reading) return;
+
+  state.currentByDevice[meter.id] = reading;
+  updatePhaseCards(reading);
+
+  if (reading.phase_a_w !== null && reading.phase_a_w !== undefined) {
+    state.phaseBuffer.push({ a: reading.phase_a_w, b: reading.phase_b_w, c: reading.phase_c_w, sum: reading.power_w });
+    if (state.phaseBuffer.length > MAX_PHASE_POINTS) {
+      state.phaseBuffer.shift();
+    }
+    redrawPhaseChartOnly();
+  }
+}
+
+function statCellHud(label, value, sub, accentClass) {
+  const div = document.createElement("div");
+  div.className = `stat-cell ${accentClass || ""}`;
+  div.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub || ""}</div>`;
+  return div;
+}
+
+async function loadLiveStats() {
+  const statBar = document.getElementById("liveStatBar");
+  const meter = mainMeterDevice();
+
+  if (!meter) {
+    statBar.innerHTML = `<div class="empty-hint">Kein Hauptzähler (Shelly Pro 3EM) eingerichtet.</div>`;
     return;
   }
 
-  state.phaseBuffer.push({ a: reading.phase_a_w, b: reading.phase_b_w, c: reading.phase_c_w });
-  if (state.phaseBuffer.length > MAX_PHASE_POINTS) {
-    state.phaseBuffer.shift();
+  const current = state.currentByDevice[meter.id];
+  const peakSince = localStorage.getItem("peakResetAt");
+  let peakData = { peak_w: null, first_ts: null };
+  try {
+    const params = new URLSearchParams();
+    if (peakSince) params.set("since", peakSince);
+    peakData = await api(`/api/devices/${meter.id}/peak?${params.toString()}`);
+  } catch {
+    // ignorieren, Kennzahlen bleiben leer
   }
 
-  drawMultiLineChart(canvas, [
-    { color: PHASE_COLORS.a, values: state.phaseBuffer.map((p) => p.a) },
-    { color: PHASE_COLORS.b, values: state.phaseBuffer.map((p) => p.b) },
-    { color: PHASE_COLORS.c, values: state.phaseBuffer.map((p) => p.c) },
-  ]);
+  const gesamtKwh = current?.energy_wh_total != null ? current.energy_wh_total / 1000 : null;
+  const arbeitspreis = state.tariff?.arbeitspreis_ct_kwh ?? null;
+  const grundpreisMonat = state.tariff?.grundpreis_monat ?? null;
+  const arbeitskosten = gesamtKwh !== null && arbeitspreis !== null ? (gesamtKwh * arbeitspreis) / 100 : null;
 
-  const last = state.phaseBuffer[state.phaseBuffer.length - 1];
-  legend.innerHTML = `
-    <span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS.a}"></span>Phase A: ${fmtW(last.a)}</span>
-    <span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS.b}"></span>Phase B: ${fmtW(last.b)}</span>
-    <span class="legend-item"><span class="legend-dot" style="background:${PHASE_COLORS.c}"></span>Phase C: ${fmtW(last.c)}</span>
-  `;
+  let gesamtkosten = arbeitskosten;
+  if (arbeitskosten !== null && grundpreisMonat !== null && peakData.first_ts) {
+    const days = Math.max(1, (Date.now() - new Date(peakData.first_ts).getTime()) / 86400000);
+    gesamtkosten = arbeitskosten + (days / 30) * grundpreisMonat;
+  }
+
+  statBar.innerHTML = "";
+  statBar.appendChild(statCellHud("Gesamt", fmtW(current?.power_w), "aktuelle Last", "accent-green"));
+  statBar.appendChild(
+    statCellHud("Peak", peakData.peak_w != null ? fmtW(peakData.peak_w) : "–", peakSince ? "seit Reset" : "seit Aufzeichnungsbeginn", "accent-cyan")
+  );
+  statBar.appendChild(statCellHud("Gesamt kWh", gesamtKwh != null ? fmtKwh(gesamtKwh) : "–", "Lebenszeit-Zähler", ""));
+  statBar.appendChild(
+    statCellHud("Arbeitskosten", arbeitskosten != null ? fmtEur(arbeitskosten) : "–", arbeitspreis != null ? `${arbeitspreis} ct/kWh` : "", "accent-warn")
+  );
+  statBar.appendChild(
+    statCellHud("Gesamtkosten", gesamtkosten != null ? fmtEur(gesamtkosten) : "–", "inkl. anteiligem Grundpreis", "accent-danger")
+  );
 }
+
+async function liveTick() {
+  if (state.paused) return;
+  await Promise.all([pollPhases(), loadLiveStats()]);
+}
+
+function restartLiveTimer() {
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = setInterval(() => liveTick().catch(() => {}), state.liveIntervalMs);
+}
+
+function updateTariffDisplay() {
+  const el = document.getElementById("tariffDisplay");
+  if (!state.tariff) {
+    el.textContent = "";
+    return;
+  }
+  const namePart = state.tariff.name ? `${state.tariff.name} · ` : "";
+  el.textContent = `⚡ ${namePart}${state.tariff.arbeitspreis_ct_kwh} ct/kWh + ${state.tariff.grundpreis_monat} €/Mon`;
+}
+
+function downloadCsv() {
+  const meter = mainMeterDevice();
+  if (!meter) {
+    alert("Kein Hauptzähler eingerichtet.");
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = `/api/devices/${meter.id}/export.csv?range=all`;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function resetPeak() {
+  localStorage.setItem("peakResetAt", new Date().toISOString());
+  loadLiveStats().catch(() => {});
+}
+
+// --- Verlauf (History) ---
 
 function populateHistoryDeviceSelect() {
   const select = document.getElementById("historyDevice");
@@ -304,43 +467,74 @@ async function loadHistoryChart() {
   }
 }
 
-async function loadOverview() {
-  const [today, month] = await Promise.all([
-    api("/api/summary?period=today"),
-    api("/api/summary?period=month"),
-  ]);
-  state.tariff = today.tariff;
+// --- Kalender ---
 
-  const mainPowerW = state.currentByDevice[today.main_meter?.device_id]?.power_w;
+async function renderCalendar() {
+  const grid = document.getElementById("calendarGrid");
+  const title = document.getElementById("calendarTitle");
+  const meter = mainMeterDevice();
+  const now = new Date();
+  title.textContent = `Kalender · ${now.toLocaleDateString("de-DE", { month: "long", year: "numeric" })}`;
 
-  const overview = document.getElementById("overview");
-  overview.innerHTML = "";
+  if (!meter) {
+    grid.innerHTML = `<div class="empty-hint">Kein Hauptzähler (Shelly Pro 3EM) eingerichtet.</div>`;
+    return;
+  }
 
-  overview.appendChild(
-    statCard("Aktuelle Gesamtleistung", fmtW(mainPowerW), today.main_meter ? "" : "Kein Hauptzähler eingerichtet")
-  );
-  overview.appendChild(
-    statCard("Heute", fmtKwh(today.main_meter?.kwh), `${fmtEur(today.main_meter?.cost_eur)} · Sonstige: ${fmtKwh(today.other?.kwh)}`)
-  );
-  overview.appendChild(
-    statCard(
-      "Diesen Monat",
-      fmtKwh(month.main_meter?.kwh),
-      `${fmtEur(month.main_meter?.cost_eur)} + ${fmtEur(month.grundpreis_eur)} Grundpreis`
-    )
-  );
+  let points;
+  try {
+    points = await api(`/api/devices/${meter.id}/history?range=month`);
+  } catch {
+    grid.innerHTML = `<div class="empty-hint">Verlauf konnte nicht geladen werden.</div>`;
+    return;
+  }
 
-  const totalMonthCost = (month.main_meter?.cost_eur || 0) + (month.grundpreis_eur || 0);
-  overview.appendChild(statCard("Monatskosten gesamt", fmtEur(totalMonthCost), `Tarif: ${today.tariff.arbeitspreis_ct_kwh} ct/kWh`));
+  const kwhByDay = {};
+  for (let i = 1; i < points.length; i++) {
+    const day = parseInt(points[i].bucket.slice(8, 10), 10);
+    const prevE = points[i - 1].energy_wh_total;
+    const curE = points[i].energy_wh_total;
+    if (prevE !== null && curE !== null && prevE !== undefined && curE !== undefined) {
+      kwhByDay[day] = Math.max(0, (curE - prevE) / 1000);
+    }
+  }
 
-  renderDeviceCards(today);
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Montag = 0
+
+  grid.innerHTML = "";
+  WEEKDAYS.forEach((wd) => {
+    const el = document.createElement("div");
+    el.className = "calendar-weekday";
+    el.textContent = wd;
+    grid.appendChild(el);
+  });
+
+  for (let i = 0; i < firstWeekday; i++) {
+    const el = document.createElement("div");
+    el.className = "calendar-day empty";
+    grid.appendChild(el);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const el = document.createElement("div");
+    const isToday = day === now.getDate();
+    el.className = `calendar-day${isToday ? " today" : ""}`;
+    const kwh = kwhByDay[day];
+    el.innerHTML = `<div class="day-number">${day}</div><div class="day-kwh">${kwh !== undefined ? kwh.toFixed(1) + " kWh" : "–"}</div>`;
+    grid.appendChild(el);
+  }
 }
 
-function statCard(label, value, sub) {
-  const div = document.createElement("div");
-  div.className = "stat";
-  div.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub || ""}</div>`;
-  return div;
+// --- Verbraucher-Zusammenfassung (Tarif + Geräte-Karten) ---
+
+async function loadTariffAndDeviceSummary() {
+  const today = await api("/api/summary?period=today");
+  state.tariff = today.tariff;
+  updateTariffDisplay();
+  renderDeviceCards(today);
 }
 
 function renderDeviceCards(todaySummary) {
@@ -393,7 +587,7 @@ async function refreshCurrentReadings() {
 async function refreshAll() {
   state.devices = await api("/api/devices");
   await refreshCurrentReadings();
-  await loadOverview();
+  await loadTariffAndDeviceSummary();
   populateHistoryDeviceSelect();
 }
 
@@ -403,6 +597,7 @@ function openSettings() {
   document.getElementById("settingsModal").classList.remove("hidden");
   renderDeviceList();
   if (state.tariff) {
+    document.getElementById("tariffName").value = state.tariff.name || "";
     document.getElementById("tariffGrundpreis").value = state.tariff.grundpreis_monat;
     document.getElementById("tariffArbeitspreis").value = state.tariff.arbeitspreis_ct_kwh;
   }
@@ -460,6 +655,7 @@ async function addDevice() {
 }
 
 async function saveTariff() {
+  const name = document.getElementById("tariffName").value.trim();
   const grundpreis_monat = parseFloat(document.getElementById("tariffGrundpreis").value);
   const arbeitspreis_ct_kwh = parseFloat(document.getElementById("tariffArbeitspreis").value);
   if (Number.isNaN(grundpreis_monat) || Number.isNaN(arbeitspreis_ct_kwh)) {
@@ -469,9 +665,9 @@ async function saveTariff() {
   await api("/api/tariff", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grundpreis_monat, arbeitspreis_ct_kwh }),
+    body: JSON.stringify({ name: name || null, grundpreis_monat, arbeitspreis_ct_kwh }),
   });
-  await loadOverview();
+  await loadTariffAndDeviceSummary();
 }
 
 document.getElementById("settingsBtn").addEventListener("click", openSettings);
@@ -479,7 +675,32 @@ document.getElementById("closeSettings").addEventListener("click", closeSettings
 document.getElementById("addDeviceBtn").addEventListener("click", addDevice);
 document.getElementById("saveTariffBtn").addEventListener("click", saveTariff);
 
+document.getElementById("csvBtn").addEventListener("click", downloadCsv);
+document.getElementById("resetPeakBtn").addEventListener("click", resetPeak);
+
+document.getElementById("liveInterval").addEventListener("change", (e) => {
+  state.liveIntervalMs = parseInt(e.target.value, 10);
+  restartLiveTimer();
+});
+
+document.getElementById("pauseBtn").addEventListener("click", () => {
+  state.paused = !state.paused;
+  const btn = document.getElementById("pauseBtn");
+  if (state.paused) {
+    btn.textContent = "Verbinden";
+    btn.classList.remove("btn-danger");
+    btn.classList.add("btn-accent");
+    setConnStatus(false, "Pausiert");
+  } else {
+    btn.textContent = "Trennen";
+    btn.classList.remove("btn-accent");
+    btn.classList.add("btn-danger");
+    liveTick().catch(() => {});
+  }
+});
+
 document.querySelectorAll(".section-tab").forEach((btn) => {
+  if (btn.disabled) return;
   btn.addEventListener("click", () => {
     document.querySelectorAll(".section-tab").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
@@ -489,9 +710,16 @@ document.querySelectorAll(".section-tab").forEach((btn) => {
 
     // Canvas-Charts brauchen eine sichtbare (nicht display:none) Fläche, um korrekt
     // zu zeichnen, daher hier gezielt neu laden/zeichnen statt auf den nächsten Timer zu warten.
-    if (panelName === "overview") pollPhases().catch(() => {});
-    if (panelName === "consumers") loadOverview().catch(() => {});
+    if (panelName === "live") {
+      if (state.paused) {
+        redrawPhaseChartOnly();
+      } else {
+        liveTick().catch(() => {});
+      }
+    }
+    if (panelName === "consumers") loadTariffAndDeviceSummary().catch(() => {});
     if (panelName === "history") loadHistoryChart().catch(() => {});
+    if (panelName === "calendar") renderCalendar().catch(() => {});
   });
 });
 
@@ -505,10 +733,13 @@ document.querySelectorAll(".range-tab").forEach((btn) => {
   });
 });
 
+updateClock();
+setInterval(updateClock, 1000);
+
 refreshAll().then(() => {
   loadHistoryChart().catch(() => {});
-  pollPhases().catch(() => {});
+  liveTick().catch(() => {});
 });
 setInterval(refreshAll, REFRESH_MS);
 setInterval(() => loadHistoryChart().catch(() => {}), HISTORY_REFRESH_MS);
-setInterval(() => pollPhases().catch(() => {}), LIVE_PHASE_REFRESH_MS);
+restartLiveTimer();

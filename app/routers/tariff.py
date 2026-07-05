@@ -10,6 +10,7 @@ router = APIRouter()
 
 class TariffIn(BaseModel):
     utility_type: str = "strom"
+    name: str | None = None
     grundpreis_monat: float
     arbeitspreis_ct_kwh: float
 
@@ -30,9 +31,9 @@ def set_tariff(tariff: TariffIn):
     now = datetime.now().isoformat()
     with db.db_cursor(commit=True) as cur:
         cur.execute(
-            "INSERT INTO tariffs (utility_type, grundpreis_monat, arbeitspreis_ct_kwh, valid_from) "
-            "VALUES (?, ?, ?, ?)",
-            (tariff.utility_type, tariff.grundpreis_monat, tariff.arbeitspreis_ct_kwh, now),
+            "INSERT INTO tariffs (utility_type, name, grundpreis_monat, arbeitspreis_ct_kwh, valid_from) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (tariff.utility_type, tariff.name, tariff.grundpreis_monat, tariff.arbeitspreis_ct_kwh, now),
         )
         cur.execute("SELECT * FROM tariffs WHERE id = ?", (cur.lastrowid,))
         return dict(cur.fetchone())

@@ -1,6 +1,9 @@
+import csv
+import io
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from .. import db
 
@@ -61,3 +64,63 @@ def history(device_id: int, range: str = Query("day", pattern="^(day|week|month)
             (device_id, since),
         )
         return [dict(r) for r in cur.fetchall()]
+
+
+@router.get("/{device_id}/peak")
+def peak(device_id: int, since: str | None = Query(None)):
+    """Höchste je gemessene Leistung (optional ab einem Reset-Zeitpunkt) plus
+    Zeitstempel der allerersten Messung überhaupt (unabhängig von `since`),
+    letzteres dient dem Frontend zur anteiligen Grundpreis-Berechnung."""
+    _get_device(device_id)
+    with db.db_cursor() as cur:
+        if since:
+            cur.execute(
+                "SELECT MAX(power_w) AS peak_w FROM readings WHERE device_id = ? AND ts >= ?",
+                (device_id, since),
+            )
+        else:
+            cur.execute("SELECT MAX(power_w) AS peak_w FROM readings WHERE device_id = ?", (device_id,))
+        peak_row = cur.fetchone()
+
+        cur.execute("SELECT MIN(ts) AS first_ts FROM readings WHERE device_id = ?", (device_id,))
+        first_row = cur.fetchone()
+
+        return {
+            "peak_w": peak_row["peak_w"] if peak_row else None,
+            "first_ts": first_row["first_ts"] if first_row else None,
+        }
+
+
+@router.get("/{device_id}/export.csv")
+def export_csv(device_id: int, range: str = Query("all", pattern="^(day|week|month|all)$")):
+    device = _get_device(device_id)
+    with db.db_cursor() as cur:
+        if range == "all":
+            cur.execute(
+                "SELECT ts, power_w, energy_wh_total, phase_a_w, phase_b_w, phase_c_w "
+                "FROM readings WHERE device_id = ? ORDER BY ts",
+                (device_id,),
+            )
+        else:
+            since = (datetime.now() - RANGE_TO_TIMEDELTA[range]).isoformat()
+            cur.execute(
+                "SELECT ts, power_w, energy_wh_total, phase_a_w, phase_b_w, phase_c_w "
+                "FROM readings WHERE device_id = ? AND ts >= ? ORDER BY ts",
+                (device_id, since),
+            )
+        rows = cur.fetchall()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["ts", "power_w", "energy_wh_total", "phase_a_w", "phase_b_w", "phase_c_w"])
+    for row in rows:
+        writer.writerow(
+            [row["ts"], row["power_w"], row["energy_wh_total"], row["phase_a_w"], row["phase_b_w"], row["phase_c_w"]]
+        )
+
+    filename = f"{device['name'].replace(' ', '_')}_{range}.csv"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

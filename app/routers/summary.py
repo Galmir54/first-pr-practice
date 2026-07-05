@@ -73,6 +73,7 @@ def get_summary(period: str = Query("today", pattern="^(today|month)$")):
         tariff = _current_tariff(cur)
         arbeitspreis = tariff["arbeitspreis_ct_kwh"] if tariff else 0.0
         grundpreis = tariff["grundpreis_monat"] if tariff else 0.0
+        tariff_name = tariff["name"] if tariff else None
 
         def cost(kwh: float) -> float:
             return round(kwh * arbeitspreis / 100.0, 2)
@@ -107,7 +108,7 @@ def get_summary(period: str = Query("today", pattern="^(today|month)$")):
 
         return {
             "period": period,
-            "tariff": {"grundpreis_monat": grundpreis, "arbeitspreis_ct_kwh": arbeitspreis},
+            "tariff": {"name": tariff_name, "grundpreis_monat": grundpreis, "arbeitspreis_ct_kwh": arbeitspreis},
             "main_meter": main_result,
             "devices": plug_results,
             "other": other_result,

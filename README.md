@@ -12,10 +12,15 @@ Die Datenmodelle sind bewusst generisch gehalten (`utility_type`-Feld), damit sp
 
 ## Funktionen
 
-- Live-Leistung (W) pro Gerät, automatische Aktualisierung alle paar Sekunden
+- **Live-Tab**: Phasen-Karten (L1/L2/L3) mit Leistung, Spannung, Strom, Leistungsfaktor
+  und Frequenz je Phase, kombinierter Chart (L1/L2/L3 + Summe), Kennzahlen-Leiste
+  (Gesamt/Peak/Gesamt-kWh/Arbeitskosten/Gesamtkosten), einstellbares Aktualisierungs-
+  intervall, Pause-Funktion, CSV-Export der Rohmesswerte, Peak-Reset
 - Tages-/Monatsverbrauch (kWh) pro Gerät, berechnet aus den Energiezählerständen der Shellys
 - Kostenberechnung auf Basis von Grundpreis (€/Monat) + Arbeitspreis (ct/kWh), inkl. Tarifhistorie
+  und optionalem Tarifnamen
 - "Sonstige Verbraucher" = Hauptzähler minus Summe der erfassten Einzelgeräte
+- Kalender-Tab mit Tages-kWh-Übersicht für den laufenden Monat
 - Geräte- und Tarifverwaltung direkt im Web-UI (kein Konfigfile nötig)
 
 ## Installation

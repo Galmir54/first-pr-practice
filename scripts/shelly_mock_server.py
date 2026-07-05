@@ -68,6 +68,18 @@ class Handler(BaseHTTPRequestHandler):
                     "b_act_power": round(b, 1),
                     "c_act_power": round(c, 1),
                     "total_act_power": round(a + b + c, 1),
+                    "a_voltage": 230.1,
+                    "b_voltage": 229.4,
+                    "c_voltage": 230.8,
+                    "a_current": round(a / 230.1, 3),
+                    "b_current": round(b / 229.4, 3),
+                    "c_current": round(c / 230.8, 3),
+                    "a_pf": 0.87,
+                    "b_pf": 0.91,
+                    "c_pf": 0.79,
+                    "a_freq": 50.0,
+                    "b_freq": 50.0,
+                    "c_freq": 50.0,
                 }
             )
             return

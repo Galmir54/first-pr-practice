@@ -1,5 +1,6 @@
 """Hintergrund-Task, der aktive Shelly-Geräte periodisch abfragt und Messwerte speichert."""
 import asyncio
+import json
 import logging
 from datetime import datetime
 
@@ -20,10 +21,11 @@ async def _poll_and_store(client: httpx.AsyncClient, device: dict) -> None:
         return
 
     ts = datetime.now().isoformat()
+    phase_meta = reading.get("phase_meta")
     with db.db_cursor(commit=True) as cur:
         cur.execute(
-            "INSERT INTO readings (device_id, ts, power_w, energy_wh_total, phase_a_w, phase_b_w, phase_c_w) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO readings (device_id, ts, power_w, energy_wh_total, phase_a_w, phase_b_w, phase_c_w, phase_meta) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 device["id"],
                 ts,
@@ -32,6 +34,7 @@ async def _poll_and_store(client: httpx.AsyncClient, device: dict) -> None:
                 reading["phase_a_w"],
                 reading["phase_b_w"],
                 reading["phase_c_w"],
+                json.dumps(phase_meta) if phase_meta is not None else None,
             ),
         )
 

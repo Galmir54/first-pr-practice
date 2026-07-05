@@ -33,6 +33,7 @@ async def poll_plug_s(client: httpx.AsyncClient, ip: str) -> dict[str, Any]:
         "phase_a_w": None,
         "phase_b_w": None,
         "phase_c_w": None,
+        "phase_meta": None,
     }
 
 
@@ -45,6 +46,11 @@ async def poll_pro_3em(client: httpx.AsyncClient, ip: str) -> dict[str, Any]:
         "phase_a_w": em.get("a_act_power"),
         "phase_b_w": em.get("b_act_power"),
         "phase_c_w": em.get("c_act_power"),
+        "phase_meta": {
+            "a": {"voltage": em.get("a_voltage"), "current": em.get("a_current"), "pf": em.get("a_pf"), "freq": em.get("a_freq")},
+            "b": {"voltage": em.get("b_voltage"), "current": em.get("b_current"), "pf": em.get("b_pf"), "freq": em.get("b_freq")},
+            "c": {"voltage": em.get("c_voltage"), "current": em.get("c_current"), "pf": em.get("c_pf"), "freq": em.get("c_freq")},
+        },
     }
 
 
