@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shelly Pro 3EM – Energie Monitor</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header>
+  <div class="header-title">
+    <h1>⚡ Shelly Pro 3EM — Energie Monitor</h1>
+    <div class="subtitle">Echtzeit · Historien · lückenlose Aufzeichnung</div>
+  </div>
+  <div class="header-meta">
+    <div class="header-clock">
+      <div class="clock-time" id="clockTime">--:--:--</div>
+      <div class="clock-date" id="clockDate">--.--.----</div>
+    </div>
+    <div class="conn-status">
+      <span class="conn-dot" id="connDot"></span>
+      <span id="connLabel">Verbunden</span>
+    </div>
+    <button class="icon-btn" id="fullscreenBtn" title="Vollbild">⛶ Vollbild</button>
+    <button class="icon-btn" id="settingsBtn" title="Einstellungen">⚙</button>
+  </div>
+</header>
+
+<main>
+  <div class="section-tabs">
+    <button class="section-tab active" data-panel="live">Live</button>
+    <button class="section-tab" data-panel="consumers">Verbraucher</button>
+    <button class="section-tab" disabled title="Kommt in einer späteren Ausbaustufe">Gas</button>
+    <button class="section-tab" data-panel="history">Verlauf</button>
+    <button class="section-tab" data-panel="calendar">Kalender</button>
+    <button class="section-tab" data-panel="floorplan">Grundriss</button>
+  </div>
+
+  <div class="tab-panel" id="panel-live">
+    <div class="live-toolbar">
+      <div class="toolbar-group">
+        Intervall
+        <select id="liveInterval">
+          <option value="2000">2 s</option>
+          <option value="5000">5 s</option>
+          <option value="10000">10 s</option>
+          <option value="30000">30 s</option>
+        </select>
+      </div>
+      <div class="toolbar-group tariff-display" id="tariffDisplay"></div>
+      <div class="toolbar-spacer"></div>
+      <button class="btn-hud btn-danger" id="pauseBtn">Trennen</button>
+      <button class="btn-hud btn-accent" id="csvBtn">CSV</button>
+      <button class="btn-hud btn-cyan" id="resetPeakBtn">↺ Max</button>
+    </div>
+
+    <div class="live-grid">
+      <div class="phase-cards" id="phaseCards">
+        <div class="phase-card" data-phase="a">
+          <div class="phase-label">L1 / Phase A</div>
+          <div class="phase-power"><span class="value">–</span><span class="unit">W</span></div>
+          <div class="phase-metrics">
+            <div class="metric"><div class="metric-label">Spannung</div><div class="metric-value" data-field="voltage">–</div></div>
+            <div class="metric"><div class="metric-label">Strom</div><div class="metric-value" data-field="current">–</div></div>
+            <div class="metric"><div class="metric-label">PF</div><div class="metric-value" data-field="pf">–</div></div>
+            <div class="metric"><div class="metric-label">Freq</div><div class="metric-value" data-field="freq">–</div></div>
+          </div>
+        </div>
+        <div class="phase-card l2" data-phase="b">
+          <div class="phase-label">L2 / Phase B</div>
+          <div class="phase-power"><span class="value">–</span><span class="unit">W</span></div>
+          <div class="phase-metrics">
+            <div class="metric"><div class="metric-label">Spannung</div><div class="metric-value" data-field="voltage">–</div></div>
+            <div class="metric"><div class="metric-label">Strom</div><div class="metric-value" data-field="current">–</div></div>
+            <div class="metric"><div class="metric-label">PF</div><div class="metric-value" data-field="pf">–</div></div>
+            <div class="metric"><div class="metric-label">Freq</div><div class="metric-value" data-field="freq">–</div></div>
+          </div>
+        </div>
+        <div class="phase-card l3" data-phase="c">
+          <div class="phase-label">L3 / Phase C</div>
+          <div class="phase-power"><span class="value">–</span><span class="unit">W</span></div>
+          <div class="phase-metrics">
+            <div class="metric"><div class="metric-label">Spannung</div><div class="metric-value" data-field="voltage">–</div></div>
+            <div class="metric"><div class="metric-label">Strom</div><div class="metric-value" data-field="current">–</div></div>
+            <div class="metric"><div class="metric-label">PF</div><div class="metric-value" data-field="pf">–</div></div>
+            <div class="metric"><div class="metric-label">Freq</div><div class="metric-value" data-field="freq">–</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-header">
+          <span>Leistungsverlauf · letzte 90 Messpunkte</span>
+          <div class="chart-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:var(--l1)"></span>L1</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--l2)"></span>L2</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--l3)"></span>L3</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--sum)"></span>Σ</span>
+          </div>
+        </div>
+        <canvas id="phaseChart"></canvas>
+      </div>
+    </div>
+
+    <div class="stat-bar" id="liveStatBar"></div>
+  </div>
+
+  <div class="tab-panel hidden" id="panel-consumers">
+    <div class="device-grid" id="deviceGrid"></div>
+  </div>
+
+  <div class="tab-panel hidden" id="panel-history">
+    <div class="history-card">
+      <div class="history-controls">
+        <select id="historyDevice"></select>
+        <div class="range-tabs">
+          <button class="range-tab active" data-range="day">Tag</button>
+          <button class="range-tab" data-range="week">Woche</button>
+          <button class="range-tab" data-range="month">Monat</button>
+        </div>
+      </div>
+      <canvas id="historyChart"></canvas>
+      <div class="history-summary" id="historySummary"></div>
+    </div>
+  </div>
+
+  <div class="tab-panel hidden" id="panel-calendar">
+    <div class="section-title" id="calendarTitle">Kalender</div>
+    <div class="calendar-grid" id="calendarGrid"></div>
+  </div>
+
+  <div class="tab-panel hidden" id="panel-floorplan">
+    <div class="stl-viewer-card">
+      <div id="stlViewerContainer" class="stl-viewer-container"></div>
+      <div class="empty-hint" id="stlViewerHint">3D-Modell wird geladen …</div>
+    </div>
+  </div>
+</main>
+
+<div class="modal-overlay hidden" id="settingsModal">
+  <div class="modal">
+    <div class="close-row">
+      <button class="secondary" id="closeSettings">Schließen ✕</button>
+    </div>
+    <h2>Einstellungen</h2>
+
+    <h3>Tarif (Strom)</h3>
+    <div class="form-row">
+      <input type="text" id="tariffName" placeholder="Tarifname (optional, z.B. RABOT.HOME)" />
+    </div>
+    <div class="form-row">
+      <input type="number" step="0.01" id="tariffGrundpreis" placeholder="Grundpreis €/Monat" />
+      <input type="number" step="0.01" id="tariffArbeitspreis" placeholder="Arbeitspreis ct/kWh" />
+      <button class="primary" id="saveTariffBtn">Speichern</button>
+    </div>
+
+    <h3>Geräte</h3>
+    <div id="deviceList"></div>
+
+    <h3>Gerät hinzufügen</h3>
+    <div class="form-row">
+      <input type="text" id="newDeviceName" placeholder="Name (z.B. Waschmaschine)" />
+      <select id="newDeviceType">
+        <option value="shelly_plug_s_gen3">Shelly Plug S (Gen3)</option>
+        <option value="shelly_pro_3em">Shelly Pro 3EM (Hauptzähler)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <input type="text" id="newDeviceIp" placeholder="IP-Adresse (z.B. 192.168.1.50)" />
+      <button class="primary" id="addDeviceBtn">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/static/vendor/three/three.module.js"
+  }
+}
+</script>
+<script type="module" src="/static/floorplan.js"></script>
+</body>
+</html>
