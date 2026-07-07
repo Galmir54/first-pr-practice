@@ -54,6 +54,51 @@ function initScene() {
   loadModel();
 }
 
+// STL-Dateien enthalten keine Farb-/Materialinfos, nur nackte Dreiecke. Um trotzdem
+// Holzboden + weiße Wände darzustellen, wird jedes Dreieck anhand der Ausrichtung
+// seiner Flächennormale eingefärbt: die Achse mit der kleinsten Ausdehnung der
+// Bounding-Box gilt als "oben" (bei einem Wohnungs-Grundriss ist das fast immer die
+// Deckenhöhe, deutlich kleiner als Länge/Breite). Zeigt die Normale stark entlang
+// dieser Achse nach oben, ist es eine Bodenfläche → Holzton, sonst Wand/Decke → weiß.
+function colorizeByOrientation(geometry) {
+  geometry.computeBoundingBox();
+  const size = new THREE.Vector3();
+  geometry.boundingBox.getSize(size);
+  const upAxis = [size.x, size.y, size.z].indexOf(Math.min(size.x, size.y, size.z));
+
+  const floorColor = new THREE.Color(0x9c6b3e);
+  const wallColor = new THREE.Color(0xf1efe9);
+
+  const pos = geometry.getAttribute("position");
+  const colors = new Float32Array(pos.count * 3);
+  const vA = new THREE.Vector3();
+  const vB = new THREE.Vector3();
+  const vC = new THREE.Vector3();
+  const edge1 = new THREE.Vector3();
+  const edge2 = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+
+  for (let base = 0; base < pos.count; base += 3) {
+    vA.fromBufferAttribute(pos, base);
+    vB.fromBufferAttribute(pos, base + 1);
+    vC.fromBufferAttribute(pos, base + 2);
+    edge1.subVectors(vB, vA);
+    edge2.subVectors(vC, vA);
+    normal.crossVectors(edge1, edge2).normalize();
+
+    const isFloor = normal.getComponent(upAxis) > 0.7;
+    const color = isFloor ? floorColor : wallColor;
+
+    for (let v = 0; v < 3; v++) {
+      colors[(base + v) * 3] = color.r;
+      colors[(base + v) * 3 + 1] = color.g;
+      colors[(base + v) * 3 + 2] = color.b;
+    }
+  }
+
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
+
 function loadModel() {
   setHint("3D-Modell wird geladen …");
   const loader = new STLLoader();
@@ -61,12 +106,12 @@ function loadModel() {
     STL_URL,
     (geometry) => {
       geometry.center();
-      geometry.computeBoundingBox();
+      colorizeByOrientation(geometry);
 
       const material = new THREE.MeshStandardMaterial({
-        color: 0x22d3ee,
+        vertexColors: true,
         metalness: 0.05,
-        roughness: 0.8,
+        roughness: 0.85,
       });
       const mesh = new THREE.Mesh(geometry, material);
       scene.add(mesh);
