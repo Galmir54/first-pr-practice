@@ -33,6 +33,7 @@
     <button class="section-tab" disabled title="Kommt in einer späteren Ausbaustufe">Gas</button>
     <button class="section-tab" data-panel="history">Verlauf</button>
     <button class="section-tab" data-panel="calendar">Kalender</button>
+    <button class="section-tab" data-panel="floorplan">Grundriss</button>
   </div>
 
   <div class="tab-panel" id="panel-live">
@@ -127,6 +128,13 @@
     <div class="section-title" id="calendarTitle">Kalender</div>
     <div class="calendar-grid" id="calendarGrid"></div>
   </div>
+
+  <div class="tab-panel hidden" id="panel-floorplan">
+    <div class="stl-viewer-card">
+      <div id="stlViewerContainer" class="stl-viewer-container"></div>
+      <div class="empty-hint" id="stlViewerHint">3D-Modell wird geladen …</div>
+    </div>
+  </div>
 </main>
 
 <div class="modal-overlay hidden" id="settingsModal">
@@ -165,5 +173,13 @@
 </div>
 
 <script src="/static/app.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/static/vendor/three/three.module.js"
+  }
+}
+</script>
+<script type="module" src="/static/floorplan.js"></script>
 </body>
 </html>
