@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db
+from . import config, db, maintenance
 from .poller import poller_loop
 from .routers import devices, readings, summary, tariff
 
@@ -16,9 +16,11 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
-    task = asyncio.create_task(poller_loop())
+    tasks = [asyncio.create_task(poller_loop()), asyncio.create_task(maintenance.maintenance_loop())]
     yield
-    task.cancel()
+    maintenance.request_stop()
+    for task in tasks:
+        task.cancel()
 
 
 app = FastAPI(title="Energie-Dashboard", lifespan=lifespan)

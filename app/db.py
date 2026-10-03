@@ -5,8 +5,11 @@ from datetime import datetime
 
 from . import config
 
-_lock = threading.Lock()
-_conn: sqlite3.Connection | None = None
+# Jeder Thread bekommt seine eigene SQLite-Verbindung. Im WAL-Modus blockieren sich
+# lesende und schreibende Verbindungen nicht gegenseitig, daher braucht es keine
+# globale Sperre mehr (die hatte den ganzen Server lahmgelegt, sobald eine einzelne
+# Abfrage lange dauerte).
+_local = threading.local()
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS devices (
@@ -41,6 +44,20 @@ CREATE TABLE IF NOT EXISTS tariffs (
     valid_from TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Höchste gemessene Leistung je Gerät, laufend mitgeführt (statt bei jeder Anfrage
+-- per MAX() über alle Messwerte zu scannen).
+CREATE TABLE IF NOT EXISTS peak_stats (
+    device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+    peak_w REAL,
+    reset_at TEXT
+);
+
+-- Kleiner Schlüssel/Wert-Speicher für den Fortschritt der Wartungsläufe.
+CREATE TABLE IF NOT EXISTS maintenance (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 # Default-Tarif, damit die Kostenberechnung sofort nutzbar ist.
@@ -49,27 +66,30 @@ DEFAULT_ARBEITSPREIS_CT_KWH = 16.47
 
 
 def get_conn() -> sqlite3.Connection:
-    global _conn
-    if _conn is None:
+    conn = getattr(_local, "conn", None)
+    if conn is None:
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        _conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute("PRAGMA foreign_keys=ON")
-    return _conn
+        conn = sqlite3.connect(str(config.DB_PATH), timeout=15)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        _local.conn = conn
+    return conn
 
 
 @contextmanager
 def db_cursor(commit: bool = False):
-    with _lock:
-        conn = get_conn()
-        cur = conn.cursor()
-        try:
-            yield cur
-            if commit:
-                conn.commit()
-        finally:
-            cur.close()
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        yield cur
+        if commit:
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
 
 
 def _ensure_column(cur: sqlite3.Cursor, table: str, column: str, column_def: str) -> None:
@@ -81,6 +101,7 @@ def _ensure_column(cur: sqlite3.Cursor, table: str, column: str, column_def: str
 
 def init_db() -> None:
     conn = get_conn()
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA_SQL)
     conn.commit()
     with db_cursor(commit=True) as cur:

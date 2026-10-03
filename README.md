@@ -48,10 +48,28 @@ Shelly-Geräte sowie den Stromtarif eintragen.
 | `ENERGY_DATA_DIR`        | `./data`          | Ablageort der SQLite-Datenbank      |
 | `ENERGY_POLL_INTERVAL`   | `2` (Sekunden)    | Abfrageintervall der Shelly-Geräte (bestimmt auch, wie oft der Live-Phasen-Chart neue Werte bekommt) |
 | `ENERGY_HTTP_TIMEOUT`    | `5` (Sekunden)    | Timeout je Shelly-Anfrage           |
+| `ENERGY_STORE_INTERVAL`  | `30` (Sekunden)   | Wie oft ein Messwert in die Datenbank geschrieben wird (die Live-Ansicht nutzt trotzdem jeden Poll-Wert) |
+| `ENERGY_THIN_AFTER_DAYS` | `2` (Tage)        | Ab diesem Alter werden Rohmesswerte ausgedünnt |
+| `ENERGY_THIN_BUCKET_SECONDS` | `300` (Sekunden) | Ausgedünnte Messwerte: ein Wert je Zeitfenster dieser Länge |
 
 Bei vielen Geräten oder wenn der Pi entlasten werden soll, kann `ENERGY_POLL_INTERVAL`
 erhöht werden (z.B. `10`) – der Live-Phasen-Chart aktualisiert sich dann entsprechend
-seltener, da er direkt auf den gespeicherten Messwerten aufbaut.
+seltener.
+
+## Datenbank-Wartung
+
+Der letzte Poll-Wert jedes Geräts liegt im Speicher (Live-Ansicht), in die SQLite-Datei
+wird nur alle `ENERGY_STORE_INTERVAL` Sekunden geschrieben. Ein Hintergrund-Job (stündlich)
+dünnt außerdem ältere Rohmesswerte aus, ohne die Zählerstände (und damit Verbrauch und
+Kosten) zu verändern; die höchste je gemessene Leistung („Peak") wird dabei in eine eigene
+Tabelle übernommen. Die Datei selbst schrumpft dadurch nicht, sie wächst aber nicht mehr –
+zum Verkleinern einmalig bei gestopptem Dienst:
+
+```bash
+sudo systemctl stop energy-dashboard
+sqlite3 ~/energie-dashboard/data/energy.db "VACUUM;"
+sudo systemctl start energy-dashboard
+```
 
 ## Geplante Erweiterung: Wasser & Gas
 

@@ -326,12 +326,9 @@ async function loadLiveStats() {
   }
 
   const current = state.currentByDevice[meter.id];
-  const peakSince = localStorage.getItem("peakResetAt");
-  let peakData = { peak_w: null, first_ts: null };
+  let peakData = { peak_w: null, first_ts: null, reset_at: null };
   try {
-    const params = new URLSearchParams();
-    if (peakSince) params.set("since", peakSince);
-    peakData = await api(`/api/devices/${meter.id}/peak?${params.toString()}`);
+    peakData = await api(`/api/devices/${meter.id}/peak`);
   } catch {
     // ignorieren, Kennzahlen bleiben leer
   }
@@ -350,7 +347,7 @@ async function loadLiveStats() {
   statBar.innerHTML = "";
   statBar.appendChild(statCellHud("Gesamt", fmtW(current?.power_w), "aktuelle Last", "accent-green"));
   statBar.appendChild(
-    statCellHud("Peak", peakData.peak_w != null ? fmtW(peakData.peak_w) : "–", peakSince ? "seit Reset" : "seit Aufzeichnungsbeginn", "accent-cyan")
+    statCellHud("Peak", peakData.peak_w != null ? fmtW(peakData.peak_w) : "–", peakData.reset_at ? "seit Reset" : "seit Aufzeichnungsbeginn", "accent-cyan")
   );
   statBar.appendChild(statCellHud("Gesamt kWh", gesamtKwh != null ? fmtKwh(gesamtKwh) : "–", "Lebenszeit-Zähler", ""));
   statBar.appendChild(
@@ -395,8 +392,15 @@ function downloadCsv() {
   a.remove();
 }
 
-function resetPeak() {
-  localStorage.setItem("peakResetAt", new Date().toISOString());
+async function resetPeak() {
+  const meter = mainMeterDevice();
+  if (!meter) return;
+  try {
+    await api(`/api/devices/${meter.id}/peak/reset`, { method: "POST" });
+  } catch {
+    alert("Peak konnte nicht zurückgesetzt werden.");
+    return;
+  }
   loadLiveStats().catch(() => {});
 }
 
