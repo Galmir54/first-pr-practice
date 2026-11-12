@@ -13,6 +13,7 @@
     <div class="subtitle">Echtzeit · Historien · lückenlose Aufzeichnung</div>
   </div>
   <div class="header-meta">
+    <div class="waste-chip hidden" id="wasteChip" title="Nächste Müllabfuhr"></div>
     <div class="header-clock">
       <div class="clock-time" id="clockTime">--:--:--</div>
       <div class="clock-date" id="clockDate">--.--.----</div>
@@ -154,6 +155,14 @@
       <button class="primary" id="saveTariffBtn">Speichern</button>
     </div>
 
+    <h3>Müllabfuhr (Landkreis Mainz-Bingen)</h3>
+    <div class="form-row">
+      <select id="wasteDistrict"></select>
+      <select id="wasteCity"></select>
+      <button class="primary" id="saveWasteBtn">Speichern</button>
+    </div>
+    <div class="meta-note" id="wasteStatus"></div>
+
     <h3>Geräte</h3>
     <div id="deviceList"></div>
 
@@ -168,6 +177,20 @@
     <div class="form-row">
       <input type="text" id="newDeviceIp" placeholder="IP-Adresse (z.B. 192.168.1.50)" />
       <button class="primary" id="addDeviceBtn">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<div class="waste-overlay hidden" id="wasteModal" role="alertdialog" aria-labelledby="wasteTitle">
+  <div class="waste-dialog">
+    <div class="waste-icon">🗑️</div>
+    <h2 id="wasteTitle">Morgen ist Müllabfuhr</h2>
+    <div class="waste-date" id="wasteDate"></div>
+    <div class="waste-bins" id="wasteBins"></div>
+    <p class="waste-hint" id="wasteHint"></p>
+    <div class="waste-actions">
+      <button class="waste-btn-done" id="wasteDoneBtn">✓ Tonnen stehen draußen</button>
+      <button class="waste-btn-snooze" id="wasteSnoozeBtn">⏰ In 30 Min. erinnern</button>
     </div>
   </div>
 </div>

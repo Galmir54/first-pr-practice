@@ -58,6 +58,25 @@ CREATE TABLE IF NOT EXISTS maintenance (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Allgemeine Einstellungen (u.a. Ort für die Müllabfuhr-Erinnerung).
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+-- Abfuhrtermine (Zwischenspeicher der KAW-Daten, damit die Erinnerung auch ohne
+-- Internet funktioniert) und welche Termine bereits als erledigt quittiert wurden.
+CREATE TABLE IF NOT EXISTS waste_dates (
+    date TEXT NOT NULL,
+    waste_type_id INTEGER NOT NULL,
+    waste_type TEXT NOT NULL,
+    PRIMARY KEY (date, waste_type_id)
+);
+CREATE TABLE IF NOT EXISTS waste_ack (
+    date TEXT PRIMARY KEY,
+    acked_at TEXT NOT NULL
+);
 """
 
 # Default-Tarif, damit die Kostenberechnung sofort nutzbar ist.

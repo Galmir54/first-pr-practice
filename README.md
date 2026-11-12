@@ -21,6 +21,7 @@ Die Datenmodelle sind bewusst generisch gehalten (`utility_type`-Feld), damit sp
   und optionalem Tarifnamen
 - "Sonstige Verbraucher" = Hauptzähler minus Summe der erfassten Einzelgeräte
 - Kalender-Tab mit Tages-kWh-Übersicht für den laufenden Monat
+- Müllabfuhr-Erinnerung (Landkreis Mainz-Bingen): Popup am Vortag ab 16 Uhr und am Abfuhrtag bis 8 Uhr, bis es quittiert wird
 - Geräte- und Tarifverwaltung direkt im Web-UI (kein Konfigfile nötig)
 
 ## Installation
@@ -55,6 +56,21 @@ Shelly-Geräte sowie den Stromtarif eintragen.
 Bei vielen Geräten oder wenn der Pi entlasten werden soll, kann `ENERGY_POLL_INTERVAL`
 erhöht werden (z.B. `10`) – der Live-Phasen-Chart aktualisiert sich dann entsprechend
 seltener.
+
+## Müllabfuhr-Erinnerung
+
+Die Abfuhrtermine holt sich der Server selbst von der öffentlichen Schnittstelle der
+KAW (Kommunale Abfallwirtschaft Mainz und Mainz-Bingen AöR), speichert sie lokal
+(funktioniert danach auch ohne Internet) und aktualisiert sie alle 12 Stunden. Den Ort
+wählst du einmalig unter ⚙ Einstellungen → „Müllabfuhr" (Abfuhrbezirk + Ort); er wird
+nur in der lokalen Datenbank gespeichert, nicht im Repo.
+
+Ein Popup erscheint am Vortag ab `ENERGY_WASTE_REMIND_FROM_HOUR` (16 Uhr) und am
+Abfuhrtag bis `ENERGY_WASTE_REMIND_UNTIL_HOUR` (8 Uhr). Es bleibt, bis du
+„Tonnen stehen draußen" tippst (gilt dann für alle Geräte); „In 30 Min. erinnern"
+blendet es nur kurz aus. Rest-/Biomüll, Gelbe Tonne und Papiertonne lösen Erinnerungen
+aus (`ENERGY_WASTE_TYPE_IDS`, KAW-IDs: 1 Rest, 2 Bio, 3 Gelb, 4 Papier, 5 Sperrmüll,
+6 Problemmüllbus). Der nächste Termin steht außerdem als Chip in der Kopfzeile.
 
 ## Datenbank-Wartung
 

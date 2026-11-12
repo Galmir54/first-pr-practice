@@ -615,9 +615,168 @@ async function refreshAll() {
 
 // --- Settings modal ---
 
+// --- Müllabfuhr-Erinnerung ---
+
+const WASTE_POLL_MS = 60000;
+const WASTE_SNOOZE_MS = 30 * 60 * 1000;
+const WASTE_SNOOZE_KEY = "wasteSnoozeUntil";
+let wasteDue = null;
+let wasteOptions = null;
+
+function wasteSnoozed() {
+  try {
+    return Number(localStorage.getItem(WASTE_SNOOZE_KEY) || 0) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function showWastePopup(due) {
+  wasteDue = due;
+  document.getElementById("wasteTitle").textContent = `${due.label} ist Müllabfuhr`;
+  document.getElementById("wasteDate").textContent = `${due.weekday}, ${due.date_display}`;
+  const bins = document.getElementById("wasteBins");
+  bins.innerHTML = "";
+  for (const type of due.types) {
+    const span = document.createElement("span");
+    span.className = `waste-bin bin-${type.id}`;
+    span.textContent = type.name;
+    bins.appendChild(span);
+  }
+  document.getElementById("wasteHint").textContent =
+    due.phase === "morning"
+      ? "Heute früh: Stehen die Tonnen schon an der Straße?"
+      : "Bitte die Tonnen heute Abend an die Straße stellen – die Abholung beginnt früh morgens.";
+  document.getElementById("wasteModal").classList.remove("hidden");
+}
+
+function hideWastePopup() {
+  wasteDue = null;
+  document.getElementById("wasteModal").classList.add("hidden");
+}
+
+async function ackWaste() {
+  if (!wasteDue) return;
+  try {
+    await api("/api/waste/ack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: wasteDue.date }),
+    });
+  } catch {
+    alert("Konnte nicht gespeichert werden – bitte nochmal tippen.");
+    return;
+  }
+  hideWastePopup();
+  pollWaste().catch(() => {});
+}
+
+function snoozeWaste() {
+  try {
+    localStorage.setItem(WASTE_SNOOZE_KEY, String(Date.now() + WASTE_SNOOZE_MS));
+  } catch {
+    // ohne localStorage kommt das Popup beim nächsten Abruf (1 Min.) wieder
+  }
+  hideWastePopup();
+}
+
+function updateWasteChip(reminder) {
+  const chip = document.getElementById("wasteChip");
+  const next = reminder.next;
+  if (!reminder.configured || !next) {
+    chip.classList.add("hidden");
+    return;
+  }
+  const todayIso = new Date().toLocaleDateString("sv-SE");
+  const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString("sv-SE");
+  chip.textContent = `🗑 ${next.weekday.slice(0, 2)} ${next.date_display} ${next.types.map((t) => t.name).join(" + ")}`;
+  chip.classList.toggle("soon", next.date === todayIso || next.date === tomorrow);
+  chip.classList.remove("hidden");
+}
+
+async function pollWaste() {
+  const reminder = await api("/api/waste/reminder");
+  updateWasteChip(reminder);
+  if (reminder.due && !wasteSnoozed()) {
+    showWastePopup(reminder.due);
+  } else if (wasteDue) {
+    hideWastePopup();
+  }
+}
+
+function fillWasteCities(districtId, selectedCityId) {
+  const citySel = document.getElementById("wasteCity");
+  citySel.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Ort wählen …";
+  citySel.appendChild(placeholder);
+  for (const city of wasteOptions.cities.filter((c) => c.district_id === Number(districtId))) {
+    const opt = document.createElement("option");
+    opt.value = city.id;
+    opt.textContent = city.name;
+    citySel.appendChild(opt);
+  }
+  if (selectedCityId) citySel.value = String(selectedCityId);
+}
+
+async function loadWasteSettings() {
+  const status = document.getElementById("wasteStatus");
+  try {
+    if (!wasteOptions) wasteOptions = await api("/api/waste/options");
+    const cfg = await api("/api/waste/config");
+    const districtSel = document.getElementById("wasteDistrict");
+    districtSel.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Abfuhrbezirk wählen …";
+    districtSel.appendChild(placeholder);
+    for (const district of wasteOptions.districts) {
+      const opt = document.createElement("option");
+      opt.value = district.id;
+      opt.textContent = district.name;
+      districtSel.appendChild(opt);
+    }
+    if (cfg.district_id) districtSel.value = String(cfg.district_id);
+    fillWasteCities(cfg.district_id, cfg.city_id);
+    status.textContent = cfg.configured
+      ? `Aktiv: ${cfg.city_name}${cfg.last_sync ? " · Termine zuletzt geladen: " + new Date(cfg.last_sync).toLocaleString("de-DE") : " · Termine werden geladen …"}`
+      : "Noch kein Ort gewählt – es gibt keine Erinnerung.";
+  } catch {
+    status.textContent = "Orte konnten nicht geladen werden (keine Internetverbindung?).";
+  }
+}
+
+async function saveWasteConfig() {
+  const district_id = parseInt(document.getElementById("wasteDistrict").value, 10);
+  const city_id = parseInt(document.getElementById("wasteCity").value, 10);
+  const status = document.getElementById("wasteStatus");
+  if (Number.isNaN(district_id) || Number.isNaN(city_id)) {
+    alert("Bitte Abfuhrbezirk und Ort wählen.");
+    return;
+  }
+  status.textContent = "Speichere und lade Termine …";
+  try {
+    const result = await api("/api/waste/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ district_id, city_id }),
+    });
+    status.textContent = result.synced
+      ? `Gespeichert: ${result.city_name} – Termine geladen.`
+      : `Gespeichert: ${result.city_name} – die Termine konnten gerade nicht geladen werden, es wird automatisch erneut versucht.`;
+  } catch {
+    status.textContent = "Speichern fehlgeschlagen.";
+  }
+  pollWaste().catch(() => {});
+}
+
+// --- Settings modal ---
+
 function openSettings() {
   document.getElementById("settingsModal").classList.remove("hidden");
   renderDeviceList();
+  loadWasteSettings().catch(() => {});
   if (state.tariff) {
     document.getElementById("tariffName").value = state.tariff.name || "";
     document.getElementById("tariffGrundpreis").value = state.tariff.grundpreis_monat;
@@ -765,3 +924,12 @@ refreshAll().then(() => {
 setInterval(refreshAll, REFRESH_MS);
 setInterval(() => loadHistoryChart().catch(() => {}), HISTORY_REFRESH_MS);
 restartLiveTimer();
+
+document.getElementById("wasteDoneBtn").addEventListener("click", ackWaste);
+document.getElementById("wasteSnoozeBtn").addEventListener("click", snoozeWaste);
+document.getElementById("saveWasteBtn").addEventListener("click", saveWasteConfig);
+document.getElementById("wasteDistrict").addEventListener("change", (e) => {
+  if (wasteOptions) fillWasteCities(e.target.value, null);
+});
+pollWaste().catch(() => {});
+setInterval(() => pollWaste().catch(() => {}), WASTE_POLL_MS);

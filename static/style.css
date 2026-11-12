@@ -830,3 +830,131 @@ button.danger-link {
   display: flex;
   justify-content: flex-end;
 }
+
+/* --- Müllabfuhr-Erinnerung --- */
+.waste-chip {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--warn);
+  border: 1px solid rgba(224, 168, 62, 0.45);
+  border-radius: 8px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.waste-chip.soon {
+  color: #1b1200;
+  background: var(--warn);
+  border-color: var(--warn);
+  font-weight: 700;
+}
+
+.meta-note {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+
+.waste-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.waste-dialog {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  text-align: center;
+  background: var(--card-bg);
+  border: 2px solid var(--warn);
+  border-radius: 18px;
+  padding: 22px 28px;
+  animation: waste-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes waste-pulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(224, 168, 62, 0.35); }
+  50% { box-shadow: 0 0 34px rgba(224, 168, 62, 0.8); }
+}
+
+.waste-icon {
+  font-size: 3.2rem;
+  line-height: 1;
+}
+
+.waste-dialog h2 {
+  margin: 8px 0 2px;
+  font-size: 1.6rem;
+  color: var(--warn);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.waste-date {
+  color: var(--text-dim);
+  font-size: 1rem;
+  margin-bottom: 14px;
+}
+
+.waste-bins {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.waste-bin {
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #fff;
+  background: #4b5563;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+
+.waste-bin.bin-1 { background: #374151; }
+.waste-bin.bin-2 { background: #7c4a1e; }
+.waste-bin.bin-3 { background: #facc15; color: #1b1200; border-color: rgba(0, 0, 0, 0.25); }
+.waste-bin.bin-4 { background: #2563eb; }
+
+.waste-hint {
+  margin: 0 0 16px;
+  font-size: 1rem;
+}
+
+.waste-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.waste-actions button {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 700;
+  border-radius: 12px;
+  padding: 14px 22px;
+  cursor: pointer;
+}
+
+.waste-btn-done {
+  background: var(--sum);
+  color: #06231d;
+  border: none;
+}
+
+.waste-btn-snooze {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--card-border);
+}
