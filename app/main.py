@@ -36,9 +36,21 @@ app.include_router(tariff.router, prefix="/api/tariff", tags=["tariff"])
 app.include_router(summary.router, prefix="/api/summary", tags=["summary"])
 app.include_router(waste_router.router, prefix="/api/waste", tags=["waste"])
 
-app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """Statische Dateien mit `Cache-Control: no-cache`: der Browser fragt bei jedem Laden
+    per ETag nach (Antwort 304, praktisch kostenlos im Heimnetz). Ohne das hält er
+    app.js/style.css nach einem Update tagelang aus dem Zwischenspeicher und zeigt eine
+    Mischung aus alter Oberfläche und neuer API."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=str(config.STATIC_DIR)), name="static")
 
 
 @app.get("/")
 async def index():
-    return FileResponse(str(config.STATIC_DIR / "index.html"))
+    return FileResponse(str(config.STATIC_DIR / "index.html"), headers={"Cache-Control": "no-cache"})
