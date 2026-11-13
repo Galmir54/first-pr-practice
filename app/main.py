@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config, db, heating, maintenance, waste
 from .poller import poller_loop
 from .routers import devices, readings, summary, tariff
+from .routers import floorplan as floorplan_router
 from .routers import heating as heating_router
 from .routers import waste as waste_router
 
@@ -38,6 +39,7 @@ app.include_router(tariff.router, prefix="/api/tariff", tags=["tariff"])
 app.include_router(summary.router, prefix="/api/summary", tags=["summary"])
 app.include_router(waste_router.router, prefix="/api/waste", tags=["waste"])
 app.include_router(heating_router.router, prefix="/api/heating", tags=["heating"])
+app.include_router(floorplan_router.router, prefix="/api/floorplan", tags=["floorplan"])
 
 class RevalidatingStaticFiles(StaticFiles):
     """Statische Dateien mit `Cache-Control: no-cache`: der Browser fragt bei jedem Laden

@@ -249,7 +249,7 @@ function loadModel() {
       setHint(null);
 
       // Zugriff für spätere Erweiterungen (Marker für Lampen/Steckdosen/Temperatur) und zum Testen.
-      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender };
+      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient };
     },
     undefined,
     () => {
@@ -318,24 +318,217 @@ function animate() {
   if (moved || needsRender) {
     renderer.render(scene, camera);
     needsRender = false;
+    updateLabelPositions();
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Räume mit Ally-Temperaturen
+//
+// Die Räume (Position in Metern + Name) liegen auf dem Server (/api/floorplan/rooms), damit alle
+// Geräte dieselben Namen sehen. Die Temperaturen kommen von /api/heating/status (der Server
+// cached die Danfoss-Cloud-Abfrage 60 s, daher reicht eine Abfrage pro Minute). Ein Thermostat
+// gehört zu dem Raum, dessen Name mit seinem Namen übereinstimmt; hat ein Raum mehrere
+// Thermostate (z.B. zwei im Arbeitszimmer), werden alle Temperaturen angezeigt.
+// ---------------------------------------------------------------------------------------------
+const labelLayer = document.getElementById("fpLabels");
+const editHint = document.getElementById("fpEditHint");
+const roomsButton = document.getElementById("fpRooms");
+const LABEL_HEIGHT_M = 0.15;
+const TEMP_POLL_MS = 60000;
+
+let rooms = []; // [{ x, z, name }]
+let thermostats = [];
+let labelEls = [];
+let editing = false;
+let tempTimer = null;
+
+const norm = (s) => String(s || "").trim().toLowerCase();
+
+function thermostatsFor(room) {
+  const name = norm(room.name);
+  if (!name) return [];
+  return thermostats.filter((t) => {
+    const tn = norm(t.name);
+    return tn && (tn === name || tn.includes(name) || name.includes(tn));
+  });
+}
+
+function tempColor(c) {
+  if (c < 18) return "#5ec8ff";
+  if (c < 20.5) return "#3fe0d0";
+  if (c < 23) return "#39ff9d";
+  if (c < 25) return "#ffb04a";
+  return "#ff6b5e";
+}
+
+const fmt = (v) => v.toFixed(1).replace(".", ",");
+
+function renderLabels() {
+  labelLayer.replaceChildren();
+  labelEls = rooms.map((room, index) => {
+    const el = document.createElement("div");
+    const ts = thermostatsFor(room);
+    const named = norm(room.name) !== "";
+    el.className = "fp-room" + (named ? "" : " unnamed") + (editing ? " editing" : "");
+
+    const name = document.createElement("div");
+    name.className = "fp-room-name";
+    name.textContent = named ? room.name : `Raum ${index + 1}`;
+    el.appendChild(name);
+
+    const live = ts.filter((t) => typeof t.room_temp === "number");
+    if (live.length) {
+      const temp = document.createElement("div");
+      temp.className = "fp-room-temp";
+      temp.textContent = live.map((t) => fmt(t.room_temp)).join(" / ") + " °C";
+      el.style.setProperty("--temp", tempColor(live.reduce((s, t) => s + t.room_temp, 0) / live.length));
+      el.appendChild(temp);
+      const sets = ts.filter((t) => typeof t.setpoint === "number");
+      if (sets.length) {
+        const set = document.createElement("div");
+        set.className = "fp-room-set";
+        set.textContent = "Soll " + sets.map((t) => fmt(t.setpoint)).join(" / ");
+        el.appendChild(set);
+      }
+    } else if (named && ts.length) {
+      el.classList.add("offline");
+      const temp = document.createElement("div");
+      temp.className = "fp-room-temp";
+      temp.textContent = "offline";
+      el.appendChild(temp);
+    }
+
+    el.addEventListener("click", () => editRoom(index));
+    labelLayer.appendChild(el);
+    return el;
+  });
+  updateLabelPositions();
+}
+
+const projected = new THREE.Vector3();
+function updateLabelPositions() {
+  if (!camera || !labelEls.length) return;
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  labelEls.forEach((el, i) => {
+    projected.set(rooms[i].x, LABEL_HEIGHT_M, rooms[i].z).project(camera);
+    const visible = projected.z < 1;
+    el.style.display = visible ? "" : "none";
+    el.style.left = `${(projected.x * 0.5 + 0.5) * w}px`;
+    el.style.top = `${(-projected.y * 0.5 + 0.5) * h}px`;
+  });
+}
+
+async function loadRooms() {
+  try {
+    const res = await fetch("/api/floorplan/rooms", { cache: "no-store" });
+    if (res.ok) rooms = (await res.json()).rooms || [];
+  } catch {
+    /* offline: vorhandene Schilder behalten */
+  }
+  renderLabels();
+}
+
+async function saveRooms() {
+  try {
+    await fetch("/api/floorplan/rooms", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rooms }),
+    });
+  } catch {
+    window.alert("Speichern fehlgeschlagen - Server nicht erreichbar.");
+  }
+}
+
+async function pollTemperatures() {
+  try {
+    const res = await fetch("/api/heating/status", { cache: "no-store" });
+    if (res.ok) thermostats = (await res.json()).thermostats || [];
+  } catch {
+    /* alte Werte behalten */
+  }
+  renderLabels();
+}
+
+function editRoom(index) {
+  if (!editing) return;
+  const answer = window.prompt("Name des Raums (leer lassen = Schild löschen):", rooms[index].name || "");
+  if (answer === null) return;
+  if (answer.trim() === "") rooms.splice(index, 1);
+  else rooms[index].name = answer.trim();
+  renderLabels();
+  saveRooms();
+}
+
+function setEditing(on) {
+  editing = on;
+  roomsButton.classList.toggle("active", on);
+  editHint.classList.toggle("hidden", !on);
+  renderLabels();
+}
+
+// Klick (kein Ziehen) auf den Boden im Bearbeiten-Modus setzt einen neuen Raum.
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -LABEL_HEIGHT_M);
+const raycaster = new THREE.Raycaster();
+let downAt = null;
+
+function floorPointFromClient(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = new THREE.Vector3();
+  return raycaster.ray.intersectPlane(floorPlane, hit) ? hit : null;
+}
+
+function setupRoomEditing() {
+  const canvas = renderer.domElement;
+  canvas.addEventListener("pointerdown", (e) => {
+    downAt = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (!editing || !downAt) return;
+    const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+    downAt = null;
+    if (moved > 6) return;
+    const p = floorPointFromClient(e.clientX, e.clientY);
+    if (!p) return;
+    const name = window.prompt("Name des neuen Raums:", "");
+    if (name === null) return;
+    rooms.push({ x: p.x, z: p.z, name: name.trim() });
+    renderLabels();
+    saveRooms();
+  });
+}
+
+roomsButton.addEventListener("click", () => setEditing(!editing));
 
 function startViewer() {
   if (!initialized) {
     initialized = true;
     if (!initScene()) return;
+    setupRoomEditing();
   }
   if (!renderer) return;
+  loadRooms(); // bei jedem Öffnen neu holen, damit Änderungen von anderen Geräten sichtbar sind
   resize();
   requestRender();
   if (animationId === null) animate();
+  if (tempTimer === null) {
+    pollTemperatures();
+    tempTimer = setInterval(pollTemperatures, TEMP_POLL_MS);
+  }
 }
 
 function stopViewer() {
   if (animationId !== null) {
     cancelAnimationFrame(animationId);
     animationId = null;
+  }
+  if (tempTimer !== null) {
+    clearInterval(tempTimer);
+    tempTimer = null;
   }
 }
 

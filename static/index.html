@@ -132,13 +132,17 @@
 
   <div class="tab-panel hidden" id="panel-floorplan">
     <div class="stl-viewer-card">
-      <div id="stlViewerContainer" class="stl-viewer-container"></div>
+      <div id="stlViewerContainer" class="stl-viewer-container">
+        <div class="fp-labels" id="fpLabels"></div>
+        <div class="fp-edit-hint hidden" id="fpEditHint">Bearbeiten: auf den Boden tippen = neuen Raum setzen · auf ein Schild tippen = umbenennen (leer = löschen)</div>
+      </div>
       <div class="empty-hint" id="stlViewerHint">3D-Modell wird geladen …</div>
       <div class="fp-toolbar hidden" id="fpToolbar">
         <div class="fp-group">
           <button class="fp-btn active" data-view="iso">3D</button>
           <button class="fp-btn" data-view="top">Draufsicht</button>
           <button class="fp-btn" id="fpReset" title="Ansicht zurücksetzen">↺</button>
+          <button class="fp-btn" id="fpRooms" title="Räume benennen und verschieben">✎ Räume</button>
         </div>
         <label class="fp-slider">
           <span class="fp-slider-label">Wandschnitt</span>

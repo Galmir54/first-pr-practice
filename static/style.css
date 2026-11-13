@@ -1055,6 +1055,90 @@ button.danger-link {
   accent-color: var(--sum);
 }
 
+/* Raum-Schilder mit Ally-Temperaturen (HTML über der 3D-Szene) */
+.fp-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.fp-room {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 10px 6px;
+  min-width: 64px;
+  text-align: center;
+  white-space: nowrap;
+  background: rgba(8, 18, 27, 0.82);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --temp: var(--text);
+}
+
+.fp-room.editing {
+  pointer-events: auto;
+  cursor: pointer;
+  border-style: dashed;
+  border-color: var(--sum);
+}
+
+.fp-room-name {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.fp-room-temp {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--temp);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--temp) 55%, transparent);
+}
+
+.fp-room-set {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+}
+
+.fp-room.unnamed .fp-room-name {
+  color: var(--sum);
+}
+
+.fp-room.offline .fp-room-temp {
+  color: var(--text-dim);
+  text-shadow: none;
+}
+
+.fp-edit-hint {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 6px 14px;
+  font-size: 0.75rem;
+  color: var(--sum);
+  background: rgba(8, 18, 27, 0.85);
+  border: 1px dashed var(--sum);
+  border-radius: 10px;
+  pointer-events: none;
+  text-align: center;
+  max-width: 90%;
+}
+
 .fp-slider-value {
   min-width: 92px;
   color: var(--text);
