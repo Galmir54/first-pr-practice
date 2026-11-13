@@ -9,6 +9,7 @@ from ..db import db_cursor
 router = APIRouter()
 
 ROOMS_KEY = "floorplan.rooms"
+THERMOSTAT_ROOMS_KEY = "floorplan.thermostat_rooms"
 
 
 class Room(BaseModel):
@@ -21,35 +22,48 @@ class Room(BaseModel):
 
 class RoomsIn(BaseModel):
     rooms: list[Room] = Field(max_length=60)
+    # Feste Zuordnung Thermostat-ID -> Raumname. Wird gebraucht, wenn der Name in der Danfoss-Cloud
+    # nicht stimmt (z.B. zwei Thermostate heißen gleich). Fehlt das Feld, bleibt die Zuordnung wie sie ist.
+    thermostat_rooms: dict[str, str] | None = Field(default=None, max_length=60)
 
 
-def _load() -> list[dict]:
+def _load(key: str, default):
     with db_cursor() as cur:
-        cur.execute("SELECT value FROM settings WHERE key = ?", (ROOMS_KEY,))
+        cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = cur.fetchone()
     if not row:
-        return []
+        return default
     try:
         return json.loads(row["value"])
     except ValueError:
-        return []
+        return default
 
 
-def _save(rooms: list[dict]) -> None:
+def _save(key: str, value) -> None:
     with db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-            (ROOMS_KEY, json.dumps(rooms, ensure_ascii=False)),
+            (key, json.dumps(value, ensure_ascii=False)),
         )
+
+
+def _get() -> dict:
+    return {"rooms": _load(ROOMS_KEY, []), "thermostat_rooms": _load(THERMOSTAT_ROOMS_KEY, {})}
+
+
+def _put(rooms: list[dict], thermostat_rooms: dict[str, str] | None) -> dict:
+    _save(ROOMS_KEY, rooms)
+    if thermostat_rooms is not None:
+        _save(THERMOSTAT_ROOMS_KEY, {k: v.strip() for k, v in thermostat_rooms.items() if v.strip()})
+    return _get()
 
 
 @router.get("/rooms")
 async def get_rooms():
-    return {"rooms": await asyncio.to_thread(_load)}
+    return await asyncio.to_thread(_get)
 
 
 @router.put("/rooms")
 async def put_rooms(body: RoomsIn):
     rooms = [{"x": round(r.x, 2), "z": round(r.z, 2), "name": r.name.strip()} for r in body.rooms]
-    await asyncio.to_thread(_save, rooms)
-    return {"rooms": rooms}
+    return await asyncio.to_thread(_put, rooms, body.thermostat_rooms)

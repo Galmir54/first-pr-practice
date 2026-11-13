@@ -339,6 +339,7 @@ const TEMP_POLL_MS = 60000;
 
 let rooms = []; // [{ x, z, name }]
 let thermostats = [];
+let thermostatRooms = {}; // { thermostatId: Raumname }
 let labelEls = [];
 let editing = false;
 let tempTimer = null;
@@ -349,7 +350,8 @@ function thermostatsFor(room) {
   const name = norm(room.name);
   if (!name) return [];
   return thermostats.filter((t) => {
-    const tn = norm(t.name);
+    // Eine feste Zuordnung (Thermostat-ID -> Raum) hat Vorrang vor dem Namen aus der Cloud.
+    const tn = norm(thermostatRooms[t.id] || t.name);
     return tn && (tn === name || tn.includes(name) || name.includes(tn));
   });
 }
@@ -423,7 +425,11 @@ function updateLabelPositions() {
 async function loadRooms() {
   try {
     const res = await fetch("/api/floorplan/rooms", { cache: "no-store" });
-    if (res.ok) rooms = (await res.json()).rooms || [];
+    if (res.ok) {
+      const data = await res.json();
+      rooms = data.rooms || [];
+      thermostatRooms = data.thermostat_rooms || {};
+    }
   } catch {
     /* offline: vorhandene Schilder behalten */
   }
