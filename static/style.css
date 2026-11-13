@@ -991,3 +991,73 @@ button.danger-link {
   color: var(--text);
   border: 1px solid var(--card-border);
 }
+
+/* --- Grundriss: modernes Puppenhaus-Design --- */
+.stl-viewer-container {
+  border-radius: 8px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 38%, #14304a 0%, #0a1824 52%, #05080d 100%);
+}
+
+.fp-toolbar {
+  position: absolute;
+  left: 22px;
+  bottom: 22px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 8px 12px;
+  background: rgba(8, 18, 27, 0.78);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+}
+
+.fp-group {
+  display: flex;
+  gap: 6px;
+}
+
+.fp-btn {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--card-border);
+  border-radius: 9px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.fp-btn.active {
+  color: var(--sum);
+  border-color: var(--sum);
+  background: rgba(57, 255, 157, 0.1);
+}
+
+.fp-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fp-slider input[type="range"] {
+  width: 180px;
+  accent-color: var(--sum);
+}
+
+.fp-slider-value {
+  min-width: 92px;
+  color: var(--text);
+  font-weight: 700;
+  text-transform: none;
+}

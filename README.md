@@ -22,6 +22,7 @@ Die Datenmodelle sind bewusst generisch gehalten (`utility_type`-Feld), damit sp
 - "Sonstige Verbraucher" = Hauptzähler minus Summe der erfassten Einzelgeräte
 - Kalender-Tab mit Tages-kWh-Übersicht für den laufenden Monat
 - Müllabfuhr-Erinnerung (Landkreis Mainz-Bingen): Popup am Vortag ab 16 Uhr und am Abfuhrtag bis 8 Uhr, bis es quittiert wird
+- Grundriss-Tab: 3D-Modell der Wohnung (STL, Maßstab 1:100) als "Puppenhaus" mit Schatten und Kantenlinien, Umschalten zwischen 3D und Draufsicht, einstellbarer Wandschnitt; die Datei liegt unter `static/models/wohnung.stl` und muss einmalig manuell auf den Pi kopiert werden (nicht im Repo)
 - Geräte- und Tarifverwaltung direkt im Web-UI (kein Konfigfile nötig)
 
 ## Installation
