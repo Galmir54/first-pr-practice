@@ -315,6 +315,7 @@ function resize() {
 function animate() {
   animationId = requestAnimationFrame(animate);
   const moved = controls.update();
+  if (tickOpenings(performance.now())) needsRender = true; // Tür/Fenster in Bewegung
   if (moved || needsRender) {
     renderer.render(scene, camera);
     needsRender = false;
@@ -334,6 +335,7 @@ function animate() {
 const labelLayer = document.getElementById("fpLabels");
 const editHint = document.getElementById("fpEditHint");
 const roomsButton = document.getElementById("fpRooms");
+const openingsButton = document.getElementById("fpOpenings");
 const LABEL_HEIGHT_M = 0.15;
 const TEMP_POLL_MS = 60000;
 
@@ -342,7 +344,9 @@ let thermostats = [];
 let thermostatRooms = {}; // { thermostatId: Raumname }
 let labelEls = [];
 let editing = false;
+let openingEditing = false;
 let tempTimer = null;
+let openingTimer = null;
 
 const norm = (s) => String(s || "").trim().toLowerCase();
 
@@ -468,10 +472,30 @@ function editRoom(index) {
   saveRooms();
 }
 
+const ROOM_HINT = "Räume: auf den Boden tippen = neues Schild setzen · auf ein Schild tippen = umbenennen (leer = löschen)";
+const OPENING_HINT =
+  "Türen/Fenster: auf den Boden tippen = neue Tür/neues Fenster setzen · auf eine Tür/ein Fenster tippen = ändern";
+
+function updateEditHint() {
+  editHint.textContent = openingEditing ? OPENING_HINT : ROOM_HINT;
+  editHint.classList.toggle("hidden", !(editing || openingEditing));
+}
+
 function setEditing(on) {
   editing = on;
+  if (on) openingEditing = false;
   roomsButton.classList.toggle("active", on);
-  editHint.classList.toggle("hidden", !on);
+  openingsButton.classList.toggle("active", openingEditing);
+  updateEditHint();
+  renderLabels();
+}
+
+function setOpeningEditing(on) {
+  openingEditing = on;
+  if (on) editing = false;
+  openingsButton.classList.toggle("active", on);
+  roomsButton.classList.toggle("active", editing);
+  updateEditHint();
   renderLabels();
 }
 
@@ -494,21 +518,348 @@ function setupRoomEditing() {
     downAt = { x: e.clientX, y: e.clientY };
   });
   canvas.addEventListener("pointerup", (e) => {
-    if (!editing || !downAt) return;
+    if (!downAt) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
     downAt = null;
-    if (moved > 6) return;
-    const p = floorPointFromClient(e.clientX, e.clientY);
-    if (!p) return;
-    const name = window.prompt("Name des neuen Raums:", "");
-    if (name === null) return;
-    rooms.push({ x: p.x, z: p.z, name: name.trim() });
-    renderLabels();
-    saveRooms();
+    if (moved > 6) return; // war Ziehen/Drehen der Ansicht, kein Antippen
+
+    if (editing) {
+      const p = floorPointFromClient(e.clientX, e.clientY);
+      if (!p) return;
+      const name = window.prompt("Name des neuen Raums:", "");
+      if (name === null) return;
+      rooms.push({ x: p.x, z: p.z, name: name.trim() });
+      renderLabels();
+      saveRooms();
+    } else {
+      handleOpeningTap(e);
+    }
   });
 }
 
 roomsButton.addEventListener("click", () => setEditing(!editing));
+openingsButton.addEventListener("click", () => setOpeningEditing(!openingEditing));
+
+// ---------------------------------------------------------------------------------------------
+// Türen und Fenster (beweglich)
+//
+// Layout (Position, Maße, Anschlag) und Zustand (offen/zu) liegen getrennt auf dem Server
+// (/api/floorplan/openings). Antippen schaltet den Zustand um; später setzen Tür-/Fensterkontakte
+// ihn über PUT /api/floorplan/openings/<id>/state. Der Grundriss holt den Zustand alle 5 s.
+// Ein leuchtender Streifen in der Öffnung zeigt den Zustand auch in der Draufsicht:
+// grün = zu, orange = offen.
+// ---------------------------------------------------------------------------------------------
+const OPENING_POLL_MS = 5000;
+const FLOOR_TOP_M = 0.1;
+const OPEN_SECONDS = 0.35;
+const OPEN_ANGLE = { door: THREE.MathUtils.degToRad(85), window: THREE.MathUtils.degToRad(70) };
+const CLOSED_COLOR = 0x39ff9d;
+const OPEN_COLOR = 0xffa23a;
+
+let openings = []; // Layout + open-Flag vom Server
+let layoutSignature = "";
+let openingGroup = null;
+let openingObjs = new Map(); // id -> { group, pivots:[{pivot, sign}], strip, progress, target }
+let openingMaterials = null;
+let lastTick = 0;
+
+function getOpeningMaterials() {
+  if (openingMaterials) return openingMaterials;
+  const clip = { clippingPlanes: [clipPlane], clipShadows: true };
+  openingMaterials = {
+    door: new THREE.MeshStandardMaterial({ color: 0xe6d3b3, roughness: 0.55, metalness: 0, ...clip }),
+    frame: new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.5, metalness: 0, ...clip }),
+    glass: new THREE.MeshStandardMaterial({
+      color: 0x9ed3ff,
+      roughness: 0.1,
+      metalness: 0,
+      transparent: true,
+      opacity: 0.32,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      clippingPlanes: [clipPlane],
+    }),
+    closed: new THREE.MeshBasicMaterial({ color: CLOSED_COLOR, clippingPlanes: [clipPlane] }),
+    open: new THREE.MeshBasicMaterial({ color: OPEN_COLOR, clippingPlanes: [clipPlane] }),
+  };
+  return openingMaterials;
+}
+
+function box(w, h, d, material, shadow = true) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  mesh.castShadow = shadow;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+// Ein Flügel: Drehpunkt (pivot) an der Bandseite, der Flügel ragt zur Öffnungsmitte.
+function buildLeaf(o, mats, side, leafWidth) {
+  const isDoor = o.kind === "door";
+  const y0 = isDoor ? FLOOR_TOP_M : o.sill + 0.02;
+  const top = isDoor ? Math.min(o.head, 2.1) - 0.02 : o.head - 0.02;
+  const h = Math.max(0.2, top - y0);
+
+  const pivot = new THREE.Group();
+  pivot.position.set((side * o.width) / 2, y0, 0);
+
+  const leaf = new THREE.Group();
+  leaf.position.set((-side * leafWidth) / 2, h / 2, 0);
+  if (isDoor) {
+    leaf.add(box(leafWidth - 0.03, h, 0.04, mats.door));
+    const handle = box(0.12, 0.025, 0.07, mats.frame, false);
+    handle.position.set(-side * (leafWidth / 2 - 0.12), -0.05, 0);
+    leaf.add(handle);
+  } else {
+    const bar = 0.05;
+    leaf.add(box(leafWidth - 0.04, h - 0.04, 0.012, mats.glass, false));
+    const top = box(leafWidth, bar, 0.05, mats.frame);
+    top.position.y = h / 2 - bar / 2;
+    const bottom = box(leafWidth, bar, 0.05, mats.frame);
+    bottom.position.y = -h / 2 + bar / 2;
+    const left = box(bar, h, 0.05, mats.frame);
+    left.position.x = -leafWidth / 2 + bar / 2;
+    const right = box(bar, h, 0.05, mats.frame);
+    right.position.x = leafWidth / 2 - bar / 2;
+    leaf.add(top, bottom, left, right);
+  }
+  pivot.add(leaf);
+  return { pivot, sign: side };
+}
+
+function buildOpening(o) {
+  const mats = getOpeningMaterials();
+  const group = new THREE.Group();
+  group.position.set(o.x, 0, o.z);
+  group.rotation.y = o.along ? -Math.PI / 2 : 0; // lokale x-Achse läuft entlang der Wand
+  group.userData.openingId = o.id;
+
+  const pivots = [];
+  if (o.kind === "window" && o.width > 1.2) {
+    // breites Fenster: zwei Flügel, an beiden Seiten angeschlagen
+    for (const side of [-1, 1]) pivots.push(buildLeaf(o, mats, side, o.width / 2));
+  } else {
+    pivots.push(buildLeaf(o, mats, o.hinge || 1, o.width));
+  }
+  pivots.forEach((p) => group.add(p.pivot));
+
+  const stripY = (o.kind === "door" ? FLOOR_TOP_M : o.sill) + 0.012;
+  const strip = new THREE.Mesh(
+    new THREE.BoxGeometry(o.width, 0.024, Math.min(0.2, Math.max(0.08, o.thick * 0.8))),
+    mats.closed
+  );
+  strip.position.set(0, stripY, 0);
+  group.add(strip);
+
+  return { group, pivots, strip, progress: o.open ? 1 : 0, target: o.open ? 1 : 0, data: o };
+}
+
+function applyPose(obj) {
+  const o = obj.data;
+  const angle = OPEN_ANGLE[o.kind] * obj.progress;
+  obj.pivots.forEach(({ pivot, sign }) => {
+    pivot.rotation.y = (o.swing || 1) * sign * angle;
+  });
+  const mats = getOpeningMaterials();
+  obj.strip.material = obj.target > 0.5 ? mats.open : mats.closed;
+}
+
+function buildAllOpenings() {
+  if (!scene) return;
+  if (!openingGroup) {
+    openingGroup = new THREE.Group();
+    scene.add(openingGroup);
+  }
+  openingGroup.clear();
+  openingObjs = new Map();
+  for (const o of openings) {
+    const obj = buildOpening(o);
+    applyPose(obj);
+    openingGroup.add(obj.group);
+    openingObjs.set(o.id, obj);
+  }
+  requestRender();
+}
+
+// Gleitet Türen/Fenster zum Soll-Zustand. Liefert true, solange noch etwas in Bewegung ist.
+function tickOpenings(now) {
+  const dt = Math.min(0.1, (now - lastTick) / 1000 || 0);
+  lastTick = now;
+  let moving = false;
+  for (const obj of openingObjs.values()) {
+    if (obj.progress === obj.target) continue;
+    const step = dt / OPEN_SECONDS;
+    obj.progress =
+      obj.progress < obj.target ? Math.min(obj.target, obj.progress + step) : Math.max(obj.target, obj.progress - step);
+    applyPose(obj);
+    if (obj.progress !== obj.target) moving = true;
+  }
+  return moving;
+}
+
+function signatureOf(list) {
+  return JSON.stringify(list.map(({ open, changed_at, ...layout }) => layout));
+}
+
+function applyOpeningData(list) {
+  const signature = signatureOf(list);
+  openings = list;
+  if (signature !== layoutSignature) {
+    layoutSignature = signature;
+    buildAllOpenings();
+    return;
+  }
+  for (const o of list) {
+    const obj = openingObjs.get(o.id);
+    if (!obj) continue;
+    obj.data = o;
+    const target = o.open ? 1 : 0;
+    if (obj.target !== target) {
+      obj.target = target;
+      applyPose(obj);
+      requestRender();
+    }
+  }
+}
+
+async function loadOpenings() {
+  try {
+    const res = await fetch("/api/floorplan/openings", { cache: "no-store" });
+    if (res.ok) applyOpeningData((await res.json()).openings || []);
+  } catch {
+    /* offline: alten Zustand behalten */
+  }
+}
+
+async function saveOpenings() {
+  try {
+    const layout = openings.map(({ open, changed_at, ...rest }) => rest);
+    await fetch("/api/floorplan/openings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openings: layout }),
+    });
+  } catch {
+    window.alert("Speichern fehlgeschlagen - Server nicht erreichbar.");
+  }
+}
+
+async function sendOpeningState(id, isOpen) {
+  try {
+    await fetch(`/api/floorplan/openings/${encodeURIComponent(id)}/state`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ open: isOpen }),
+    });
+  } catch {
+    /* der nächste Abruf holt den echten Zustand zurück */
+  }
+}
+
+function openingFromEvent(e) {
+  if (!openingGroup || !openingGroup.children.length) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects(openingGroup.children, true);
+  for (const hit of hits) {
+    let node = hit.object;
+    while (node && !node.userData.openingId) node = node.parent;
+    if (node) return openings.find((o) => o.id === node.userData.openingId) || null;
+  }
+  return null;
+}
+
+function toggleOpening(o) {
+  o.open = !o.open;
+  const obj = openingObjs.get(o.id);
+  if (obj) {
+    obj.target = o.open ? 1 : 0;
+    applyPose(obj);
+  }
+  requestRender();
+  sendOpeningState(o.id, o.open);
+}
+
+function openingLabel(o) {
+  return o.name || (o.kind === "door" ? "Tür" : "Fenster");
+}
+
+function editOpening(o) {
+  const answer = window.prompt(
+    `${openingLabel(o)} (${o.width.toFixed(2).replace(".", ",")} m breit)\n` +
+      "h = Bänder links/rechts tauschen\n" +
+      "s = Aufschwingrichtung umdrehen\n" +
+      "k = Tür <-> Fenster\n" +
+      "b = Breite ändern\n" +
+      "n = Namen vergeben\n" +
+      "l = löschen",
+    ""
+  );
+  if (answer === null) return;
+  const cmd = answer.trim().toLowerCase()[0];
+  if (cmd === "h") o.hinge = -(o.hinge || 1);
+  else if (cmd === "s") o.swing = -(o.swing || 1);
+  else if (cmd === "k") {
+    o.kind = o.kind === "door" ? "window" : "door";
+    o.sill = o.kind === "window" ? 0.95 : 0;
+    o.head = o.kind === "window" ? 2.3 : 2.1;
+  } else if (cmd === "b") {
+    const w = parseFloat((window.prompt("Neue Breite in Metern:", String(o.width)) || "").replace(",", "."));
+    if (!(w > 0.3 && w < 6)) return;
+    o.width = w;
+  } else if (cmd === "n") {
+    const name = window.prompt("Name (z.B. Balkontür Wohnzimmer):", o.name || "");
+    if (name === null) return;
+    o.name = name.trim().slice(0, 40);
+  } else if (cmd === "l") {
+    openings = openings.filter((x) => x !== o);
+  } else return;
+  layoutSignature = ""; // erzwingt Neuaufbau
+  applyOpeningData(openings);
+  saveOpenings();
+}
+
+function newOpening(point) {
+  const kindAnswer = (window.prompt("Neue Öffnung: t = Tür, f = Fenster", "t") || "").trim().toLowerCase()[0];
+  if (kindAnswer !== "t" && kindAnswer !== "f") return;
+  const alongAnswer = (
+    window.prompt("Wandrichtung in der Draufsicht: w = waagerecht, s = senkrecht", "w") || ""
+  ).trim().toLowerCase()[0];
+  if (alongAnswer !== "w" && alongAnswer !== "s") return;
+  const kind = kindAnswer === "t" ? "door" : "window";
+  const id = `${kind === "door" ? "t" : "f"}${Date.now().toString(36)}`;
+  openings.push({
+    id,
+    kind,
+    x: Math.round(point.x * 100) / 100,
+    z: Math.round(point.z * 100) / 100,
+    width: kind === "door" ? 0.9 : 1.2,
+    along: alongAnswer === "s" ? 1 : 0,
+    thick: 0.1,
+    sill: kind === "window" ? 0.95 : 0,
+    head: kind === "window" ? 2.3 : 2.1,
+    hinge: 1,
+    swing: 1,
+    name: "",
+    open: false,
+  });
+  layoutSignature = "";
+  applyOpeningData(openings);
+  saveOpenings();
+}
+
+function handleOpeningTap(e) {
+  const hit = openingFromEvent(e);
+  if (openingEditing) {
+    if (hit) editOpening(hit);
+    else {
+      const p = floorPointFromClient(e.clientX, e.clientY);
+      if (p) newOpening(p);
+    }
+  } else if (hit) {
+    toggleOpening(hit);
+  }
+}
 
 function startViewer() {
   if (!initialized) {
@@ -518,6 +869,8 @@ function startViewer() {
   }
   if (!renderer) return;
   loadRooms(); // bei jedem Öffnen neu holen, damit Änderungen von anderen Geräten sichtbar sind
+  loadOpenings();
+  if (openingTimer === null) openingTimer = setInterval(loadOpenings, OPENING_POLL_MS);
   resize();
   requestRender();
   if (animationId === null) animate();
@@ -535,6 +888,10 @@ function stopViewer() {
   if (tempTimer !== null) {
     clearInterval(tempTimer);
     tempTimer = null;
+  }
+  if (openingTimer !== null) {
+    clearInterval(openingTimer);
+    openingTimer = null;
   }
 }
 

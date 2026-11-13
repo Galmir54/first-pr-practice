@@ -134,7 +134,12 @@
     <div class="stl-viewer-card">
       <div id="stlViewerContainer" class="stl-viewer-container">
         <div class="fp-labels" id="fpLabels"></div>
-        <div class="fp-edit-hint hidden" id="fpEditHint">Bearbeiten: auf den Boden tippen = neuen Raum setzen · auf ein Schild tippen = umbenennen (leer = löschen)</div>
+        <div class="fp-edit-hint hidden" id="fpEditHint"></div>
+        <div class="fp-legend" id="fpLegend">
+          <span><i class="fp-dot closed"></i>zu</span>
+          <span><i class="fp-dot open"></i>offen</span>
+          <span class="fp-legend-note">Tür/Fenster antippen = öffnen/schließen</span>
+        </div>
       </div>
       <div class="empty-hint" id="stlViewerHint">3D-Modell wird geladen …</div>
       <div class="fp-toolbar hidden" id="fpToolbar">
@@ -143,6 +148,7 @@
           <button class="fp-btn" data-view="top">Draufsicht</button>
           <button class="fp-btn" id="fpReset" title="Ansicht zurücksetzen">↺</button>
           <button class="fp-btn" id="fpRooms" title="Räume benennen und verschieben">✎ Räume</button>
+          <button class="fp-btn" id="fpOpenings" title="Türen und Fenster einrichten">✎ Türen/Fenster</button>
         </div>
         <label class="fp-slider">
           <span class="fp-slider-label">Wandschnitt</span>

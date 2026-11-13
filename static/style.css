@@ -1139,6 +1139,47 @@ button.danger-link {
   max-width: 90%;
 }
 
+/* Legende für Türen/Fenster (oben rechts) */
+.fp-legend {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: rgba(8, 18, 27, 0.78);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.fp-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.fp-dot.closed {
+  background: #39ff9d;
+  box-shadow: 0 0 8px #39ff9d;
+}
+
+.fp-dot.open {
+  background: #ffa23a;
+  box-shadow: 0 0 8px #ffa23a;
+}
+
+.fp-legend-note {
+  opacity: 0.75;
+}
+
 .fp-slider-value {
   min-width: 92px;
   color: var(--text);
