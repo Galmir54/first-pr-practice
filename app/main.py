@@ -6,9 +6,10 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, maintenance, waste
+from . import config, db, heating, maintenance, waste
 from .poller import poller_loop
 from .routers import devices, readings, summary, tariff
+from .routers import heating as heating_router
 from .routers import waste as waste_router
 
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(poller_loop()),
         asyncio.create_task(maintenance.maintenance_loop()),
         asyncio.create_task(waste.waste_loop()),
+        asyncio.create_task(heating.heating_loop()),
     ]
     yield
     maintenance.request_stop()
@@ -35,6 +37,7 @@ app.include_router(readings.router, prefix="/api/devices", tags=["readings"])
 app.include_router(tariff.router, prefix="/api/tariff", tags=["tariff"])
 app.include_router(summary.router, prefix="/api/summary", tags=["summary"])
 app.include_router(waste_router.router, prefix="/api/waste", tags=["waste"])
+app.include_router(heating_router.router, prefix="/api/heating", tags=["heating"])
 
 class RevalidatingStaticFiles(StaticFiles):
     """Statische Dateien mit `Cache-Control: no-cache`: der Browser fragt bei jedem Laden

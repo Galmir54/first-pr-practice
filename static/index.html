@@ -163,6 +163,29 @@
     </div>
     <div class="meta-note" id="wasteStatus"></div>
 
+    <h3>Heizung (Danfoss Ally) – absenken, wenn niemand zu Hause ist</h3>
+    <div class="form-row">
+      <label class="check-label"><input type="checkbox" id="heatingEnabled" /> Automatik aktiv</label>
+    </div>
+    <div class="form-row">
+      <input type="text" id="heatingKey" placeholder="Danfoss API-Schlüssel (Key)" autocomplete="off" />
+      <input type="password" id="heatingSecret" placeholder="Danfoss API-Secret" autocomplete="new-password" />
+    </div>
+    <div class="form-row">
+      <input type="text" id="heatingPhones" placeholder="Handy-IP(s), mehrere mit Komma (z.B. 192.168.178.40)" />
+    </div>
+    <div class="form-row">
+      <input type="number" step="0.5" min="5" max="30" id="heatingAwayTemp" placeholder="Absenken auf °C" title="Absenktemperatur in °C" />
+      <input type="number" step="1" min="1" max="240" id="heatingDelay" placeholder="Warten (Min.)" title="So viele Minuten muss das Handy weg sein" />
+      <button class="primary" id="saveHeatingBtn">Speichern</button>
+    </div>
+    <div class="form-row">
+      <button class="secondary" id="heatingAwayBtn">Jetzt absenken (Test)</button>
+      <button class="secondary" id="heatingHomeBtn">Jetzt zurücksetzen</button>
+    </div>
+    <div class="meta-note" id="heatingStatus"></div>
+    <div class="heating-list" id="heatingList"></div>
+
     <h3>Geräte</h3>
     <div id="deviceList"></div>
 

@@ -856,6 +856,39 @@ button.danger-link {
   margin-top: 4px;
 }
 
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.form-row .check-label input {
+  flex: none;
+  min-width: 0;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.heating-list {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.heating-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.heating-row .dim {
+  color: var(--text-dim);
+}
+
 .waste-overlay {
   position: fixed;
   inset: 0;

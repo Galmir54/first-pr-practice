@@ -771,12 +771,133 @@ async function saveWasteConfig() {
   pollWaste().catch(() => {});
 }
 
+// --- Heizung (Danfoss Ally) ---
+
+const MODE_LABELS = {
+  hot: "Wochenplan",
+  at_home: "Zuhause",
+  leaving_home: "Abwesend",
+  manual: "Manuell",
+  pause: "Aus",
+  holiday: "Urlaub",
+};
+
+function fmtTemp(t) {
+  return t === null || t === undefined ? "–" : `${t.toFixed(1).replace(".", ",")} °C`;
+}
+
+function fmtTime(iso) {
+  return iso ? new Date(iso).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "–";
+}
+
+async function loadHeatingSettings() {
+  const cfg = await api("/api/heating/config");
+  document.getElementById("heatingEnabled").checked = cfg.enabled;
+  document.getElementById("heatingKey").value = cfg.ally_key;
+  document.getElementById("heatingSecret").value = "";
+  document.getElementById("heatingSecret").placeholder = cfg.has_secret
+    ? "Secret gespeichert (leer lassen = behalten)"
+    : "Danfoss API-Secret";
+  document.getElementById("heatingPhones").value = cfg.phone_ips.join(", ");
+  document.getElementById("heatingAwayTemp").value = cfg.away_temp;
+  document.getElementById("heatingDelay").value = cfg.away_delay_min;
+  await loadHeatingStatus();
+}
+
+async function loadHeatingStatus() {
+  const status = document.getElementById("heatingStatus");
+  const list = document.getElementById("heatingList");
+  const st = await api("/api/heating/status");
+  const parts = [
+    st.state === "away"
+      ? `Zustand: abgesenkt seit ${fmtTime(st.last_change)}`
+      : `Zustand: normal${st.last_change ? " seit " + fmtTime(st.last_change) : ""}`,
+  ];
+  if (st.hold_minutes) parts.push(`Automatik pausiert noch ${st.hold_minutes} Min. (nach Test)`);
+  if (st.last_error) parts.push(`Fehler: ${st.last_error}`);
+  if (st.thermostat_error) parts.push(`Danfoss: ${st.thermostat_error}`);
+  status.textContent = parts.join(" · ");
+
+  list.innerHTML = "";
+  const addRow = (left, right) => {
+    const row = document.createElement("div");
+    row.className = "heating-row";
+    const l = document.createElement("span");
+    l.textContent = left;
+    const r = document.createElement("span");
+    r.className = "dim";
+    r.textContent = right;
+    row.append(l, r);
+    list.appendChild(row);
+  };
+  for (const phone of st.phones) {
+    const state = phone.present === null ? "noch nicht geprüft" : phone.present ? "im WLAN" : "nicht erreichbar";
+    const seen = phone.last_seen ? ` · zuletzt gesehen ${fmtTime(phone.last_seen)}` : "";
+    addRow(`📱 ${phone.ip}`, state + seen);
+  }
+  for (const t of st.thermostats) {
+    const mode = MODE_LABELS[t.mode] || t.mode || "?";
+    const battery = t.battery !== null && t.battery !== undefined ? ` · 🔋 ${t.battery} %` : "";
+    addRow(
+      `🌡️ ${t.name}${t.online ? "" : " (offline)"}`,
+      `Raum ${fmtTemp(t.room_temp)} · Soll ${fmtTemp(t.setpoint)} · ${mode}${battery}`,
+    );
+  }
+}
+
+async function saveHeatingConfig() {
+  const away_temp = parseFloat(document.getElementById("heatingAwayTemp").value);
+  const away_delay_min = parseInt(document.getElementById("heatingDelay").value, 10);
+  if (Number.isNaN(away_temp) || Number.isNaN(away_delay_min)) {
+    alert("Bitte Absenktemperatur und Wartezeit angeben.");
+    return;
+  }
+  const body = {
+    enabled: document.getElementById("heatingEnabled").checked,
+    ally_key: document.getElementById("heatingKey").value.trim(),
+    ally_secret: document.getElementById("heatingSecret").value.trim() || null,
+    phone_ips: document.getElementById("heatingPhones").value.split(",").map((s) => s.trim()).filter(Boolean),
+    away_temp,
+    away_delay_min,
+  };
+  const res = await fetch("/api/heating/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(typeof err.detail === "string" ? err.detail : "Speichern fehlgeschlagen – Eingaben prüfen.");
+    return;
+  }
+  document.getElementById("heatingStatus").textContent = "Gespeichert, lade Thermostate …";
+  await loadHeatingSettings();
+}
+
+async function heatingAction(action) {
+  const status = document.getElementById("heatingStatus");
+  status.textContent = action === "away" ? "Senke ab …" : "Setze zurück …";
+  const res = await fetch("/api/heating/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.detail || (data.errors || []).join("\n") || "Befehl fehlgeschlagen.");
+  }
+  await loadHeatingStatus();
+}
+
 // --- Settings modal ---
 
 function openSettings() {
   document.getElementById("settingsModal").classList.remove("hidden");
   renderDeviceList();
   loadWasteSettings().catch(() => {});
+  loadHeatingSettings().catch(() => {
+    document.getElementById("heatingStatus").textContent = "Heizungs-Einstellungen konnten nicht geladen werden.";
+  });
   if (state.tariff) {
     document.getElementById("tariffName").value = state.tariff.name || "";
     document.getElementById("tariffGrundpreis").value = state.tariff.grundpreis_monat;
@@ -855,6 +976,9 @@ document.getElementById("settingsBtn").addEventListener("click", openSettings);
 document.getElementById("closeSettings").addEventListener("click", closeSettings);
 document.getElementById("addDeviceBtn").addEventListener("click", addDevice);
 document.getElementById("saveTariffBtn").addEventListener("click", saveTariff);
+document.getElementById("saveHeatingBtn").addEventListener("click", () => saveHeatingConfig().catch(() => {}));
+document.getElementById("heatingAwayBtn").addEventListener("click", () => heatingAction("away").catch(() => {}));
+document.getElementById("heatingHomeBtn").addEventListener("click", () => heatingAction("home").catch(() => {}));
 
 document.getElementById("csvBtn").addEventListener("click", downloadCsv);
 document.getElementById("resetPeakBtn").addEventListener("click", resetPeak);

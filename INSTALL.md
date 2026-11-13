@@ -104,6 +104,27 @@ python scripts/shelly_mock_server.py --port 8002 --type 3em &
 
 Dann im Dashboard ein Gerät mit IP-Adresse `localhost:8001` bzw. `localhost:8002` anlegen.
 
+## Optional – Heizung mit Danfoss Ally absenken
+
+Voraussetzung: Ally Gateway mit eingebundenen Thermostaten, eingerichtet in der Ally-App.
+
+1. **API-Zugang holen:** auf <https://developer.danfoss.com> ein Konto anlegen, eine
+   App anlegen und dabei die **Danfoss Ally API** auswählen. Du bekommst einen
+   **Key** und ein **Secret**. Laut Danfoss muss das Konto **genau dieselbe
+   E-Mail-Adresse wie die Ally-App** haben, auch bei Groß- und Kleinschreibung. Darüber
+   werden die Thermostate zugeordnet.
+2. **Feste IP fürs Handy:** im Router (z. B. FRITZ!Box → Heimnetz → Netzwerk → Gerät
+   bearbeiten → „Immer die gleiche IPv4-Adresse zuweisen“) dem Handy eine feste IP
+   geben. iPhone und Android nutzen pro WLAN eine eigene „private“ MAC-Adresse, die
+   aber für dein Heim-WLAN gleich bleibt. Bitte nicht auf „rotierend“ stellen.
+3. Im Dashboard ⚙ → „Heizung (Danfoss Ally)“: Key, Secret, Handy-IP(s),
+   Absenktemperatur und Wartezeit eintragen, **Speichern**. Darunter erscheinen jetzt
+   die Thermostate mit Raum- und Solltemperatur. Erscheint dort ein Fehler, stimmt
+   der Zugang noch nicht.
+4. **Jetzt absenken (Test)** drücken und in der Ally-App prüfen, ob die Thermostate
+   auf „Abwesend“ mit der Absenktemperatur stehen. Danach **Jetzt zurücksetzen**.
+5. **Automatik aktiv** anhaken und speichern.
+
 ## Fehlerbehebung
 
 | Problem | Lösung |

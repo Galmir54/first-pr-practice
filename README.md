@@ -72,6 +72,25 @@ blendet es nur kurz aus. Rest-/Biomüll, Gelbe Tonne und Papiertonne lösen Erin
 aus (`ENERGY_WASTE_TYPE_IDS`, KAW-IDs: 1 Rest, 2 Bio, 3 Gelb, 4 Papier, 5 Sperrmüll,
 6 Problemmüllbus). Der nächste Termin steht außerdem als Chip in der Kopfzeile.
 
+## Heizung absenken, wenn niemand zu Hause ist (Danfoss Ally)
+
+Der Server prüft alle 30 Sekunden, ob die eingetragenen Handys im WLAN sind (Ping und
+ARP-Abfrage, funktioniert auch, wenn das Handy im Standby nicht auf Ping antwortet).
+Ist **kein** Handy mehr seit der eingestellten Wartezeit (Standard 15 Min.) erreichbar,
+schaltet er alle Ally-Thermostate über die Danfoss-Cloud auf „Abwesend“ mit der
+Absenktemperatur (Standard 17 °C). Vorher merkt er sich je Thermostat den bisherigen
+Modus. Sobald ein Handy wieder im WLAN ist, stellt er genau diesen Modus wieder her,
+z. B. den Wochenplan oder manuell 23 °C. Klappt ein Befehl nicht (z. B. kein
+Internet), versucht er es alle 30 Sekunden erneut. Nach einem Neustart des Pi wartet
+er erst die volle Wartezeit ab, bevor er absenkt.
+
+Einrichtung unter ⚙ Einstellungen → „Heizung (Danfoss Ally)“, Schritt für Schritt in
+[INSTALL.md](INSTALL.md#optional--heizung-mit-danfoss-ally-absenken). Mit
+„Jetzt absenken (Test)“ / „Jetzt zurücksetzen“ lässt sich das sofort ausprobieren;
+die Automatik pausiert danach 10 Minuten, damit sie den Test nicht gleich rückgängig
+macht. API-Secret und Handy-IPs liegen nur in der lokalen Datenbank, das Secret wird
+nie an den Browser zurückgegeben.
+
 ## Datenbank-Wartung
 
 Der letzte Poll-Wert jedes Geräts liegt im Speicher (Live-Ansicht), in die SQLite-Datei
