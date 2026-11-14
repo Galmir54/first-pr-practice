@@ -1124,8 +1124,8 @@ button.danger-link {
   height: 22px;
   margin-bottom: -9px;
   z-index: 1;
-  color: var(--temp);
-  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--temp) 70%, transparent));
+  color: var(--heat, var(--temp));
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--heat, var(--temp)) 70%, transparent));
 }
 
 .fp-room-icon svg {
@@ -1325,4 +1325,166 @@ button.danger-link {
   color: var(--text);
   font-weight: 700;
   text-transform: none;
+}
+
+/* Fenster zum Einstellen der Solltemperatur (Antippen eines Raumschilds) */
+.fp-room.tappable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.fp-popup {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+}
+
+.fp-popup-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 9, 15, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.fp-popup-box {
+  position: relative;
+  width: min(340px, calc(100% - 32px));
+  padding: 14px 16px 16px;
+  background: rgba(14, 28, 42, 0.96);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+
+.fp-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.fp-popup-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fp-popup-close {
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.fp-popup-row {
+  padding: 10px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fp-popup-row.offline {
+  opacity: 0.55;
+}
+
+.fp-popup-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.fp-popup-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.fp-popup-dot.heating {
+  background: #ff4d4d;
+  box-shadow: 0 0 8px #ff4d4d;
+}
+
+.fp-popup-dot.idle {
+  background: #4aa3ff;
+  box-shadow: 0 0 8px #4aa3ff;
+}
+
+.fp-popup-stepper {
+  display: grid;
+  grid-template-columns: 56px 1fr 56px;
+  align-items: center;
+  gap: 10px;
+}
+
+.fp-popup-stepper button {
+  height: 52px;
+  font-size: 1.7rem;
+  line-height: 1;
+  color: #fff;
+  background: rgba(61, 120, 179, 0.35);
+  border: 1px solid rgba(70, 130, 190, 0.8);
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+.fp-popup-stepper button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.fp-popup-value {
+  text-align: center;
+  font-size: 1.7rem;
+  font-weight: 600;
+}
+
+.fp-popup-value.changed {
+  color: #ffb04a;
+}
+
+.fp-popup-error {
+  min-height: 1.1em;
+  margin: 4px 0 2px;
+  font-size: 0.75rem;
+  color: #ff8a80;
+}
+
+.fp-popup-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.fp-popup-actions button {
+  flex: 1;
+  height: 46px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.fp-popup-cancel {
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--card-border);
+}
+
+.fp-popup-apply {
+  color: #06251a;
+  background: var(--sum);
+  border: 1px solid var(--sum);
+}
+
+.fp-popup-apply:disabled {
+  opacity: 0.6;
 }

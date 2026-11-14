@@ -910,6 +910,8 @@ function renderLabels() {
     const live = ts.filter((t) => typeof t.room_temp === "number");
     if (live.length) {
       el.style.setProperty("--temp", tempColor(live.reduce((s, t) => s + t.room_temp, 0) / live.length));
+      // Thermometer: rot, wenn mindestens ein Thermostat im Raum gerade heizt, sonst blau
+      el.style.setProperty("--heat", live.some((t) => t.heating) ? "#ff4d4d" : "#4aa3ff");
       const icon = document.createElement("div");
       icon.className = "fp-room-icon";
       icon.innerHTML = THERMOMETER_SVG;
@@ -950,7 +952,8 @@ function renderLabels() {
       el.appendChild(set);
     }
 
-    el.addEventListener("click", () => editRoom(index));
+    if (ts.length) el.classList.add("tappable");
+    el.addEventListener("click", () => (editing ? editRoom(index) : openTempDialog(room)));
     labelLayer.appendChild(el);
     return el;
   });
@@ -1093,6 +1096,182 @@ async function pollTemperatures() {
   }
   renderLabels();
 }
+
+// ---------------------------------------------------------------------------------------------
+// Solltemperatur einstellen: Antippen eines Raumschilds öffnet ein kleines Fenster mit
+// -/+ in halben Grad je Thermostat. "Übernehmen" schickt nur geänderte Werte an den Server
+// (POST /api/heating/setpoints), der sie über die Danfoss-Cloud an die Thermostate gibt.
+// ---------------------------------------------------------------------------------------------
+const TEMP_STEP = 0.5;
+const TEMP_MIN = 5;
+const TEMP_MAX = 30;
+const tempDialog = document.createElement("div");
+tempDialog.className = "fp-popup hidden";
+container.appendChild(tempDialog);
+let tempDialogState = null;
+
+function closeTempDialog() {
+  tempDialog.classList.add("hidden");
+  tempDialog.replaceChildren();
+  tempDialogState = null;
+}
+
+function openTempDialog(room) {
+  const ts = thermostatsFor(room);
+  if (!ts.length) return;
+  tempDialogState = {
+    room,
+    busy: false,
+    items: ts.map((t) => {
+      const target = typeof t.setpoint === "number" ? t.setpoint : 20;
+      return {
+        id: t.id,
+        online: t.online !== false,
+        current: t.room_temp,
+        heating: Boolean(t.heating),
+        mode: t.mode,
+        original: target,
+        target,
+      };
+    }),
+  };
+  renderTempDialog();
+}
+
+function renderTempDialog() {
+  const st = tempDialogState;
+  if (!st) return;
+  tempDialog.replaceChildren();
+  tempDialog.classList.remove("hidden");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "fp-popup-backdrop";
+  backdrop.addEventListener("click", closeTempDialog);
+
+  const box = document.createElement("div");
+  box.className = "fp-popup-box";
+
+  const head = document.createElement("div");
+  head.className = "fp-popup-head";
+  const title = document.createElement("div");
+  title.className = "fp-popup-title";
+  title.textContent = st.room.name;
+  const close = document.createElement("button");
+  close.className = "fp-popup-close";
+  close.textContent = "✕";
+  close.title = "Schließen";
+  close.addEventListener("click", closeTempDialog);
+  head.append(title, close);
+  box.appendChild(head);
+
+  const status = document.createElement("div");
+  status.className = "fp-popup-error";
+
+  st.items.forEach((item, n) => {
+    const row = document.createElement("div");
+    row.className = "fp-popup-row" + (item.online ? "" : " offline");
+
+    const info = document.createElement("div");
+    info.className = "fp-popup-info";
+    const dot = document.createElement("span");
+    dot.className = "fp-popup-dot " + (item.heating ? "heating" : "idle");
+    const label = document.createElement("span");
+    const nowText = typeof item.current === "number" ? `${fmt(item.current)} °C` : "–";
+    label.textContent =
+      (st.items.length > 1 ? `Thermostat ${n + 1} · ` : "") +
+      (item.online ? `jetzt ${nowText} · ${item.heating ? "heizt" : "heizt nicht"}` : "offline");
+    info.append(dot, label);
+
+    const stepper = document.createElement("div");
+    stepper.className = "fp-popup-stepper";
+    const minus = document.createElement("button");
+    minus.textContent = "−";
+    const value = document.createElement("div");
+    value.className = "fp-popup-value";
+    const plus = document.createElement("button");
+    plus.textContent = "+";
+    const update = () => {
+      value.textContent = `${fmt(item.target)} °C`;
+      value.classList.toggle("changed", item.target !== item.original);
+      minus.disabled = !item.online || item.target <= TEMP_MIN;
+      plus.disabled = !item.online || item.target >= TEMP_MAX;
+    };
+    const nudge = (delta) => {
+      item.target = Math.min(TEMP_MAX, Math.max(TEMP_MIN, Math.round((item.target + delta) / TEMP_STEP) * TEMP_STEP));
+      status.textContent = "";
+      update();
+    };
+    minus.addEventListener("click", () => nudge(-TEMP_STEP));
+    plus.addEventListener("click", () => nudge(TEMP_STEP));
+    update();
+    stepper.append(minus, value, plus);
+
+    row.append(info, stepper);
+    box.appendChild(row);
+  });
+
+  box.appendChild(status);
+
+  const actions = document.createElement("div");
+  actions.className = "fp-popup-actions";
+  const cancel = document.createElement("button");
+  cancel.className = "fp-popup-cancel";
+  cancel.textContent = "Abbrechen";
+  cancel.addEventListener("click", closeTempDialog);
+  const apply = document.createElement("button");
+  apply.className = "fp-popup-apply";
+  apply.textContent = "Übernehmen";
+  apply.addEventListener("click", () => submitTempDialog(apply, status));
+  actions.append(cancel, apply);
+  box.appendChild(actions);
+
+  tempDialog.append(backdrop, box);
+}
+
+async function submitTempDialog(applyButton, statusEl) {
+  const st = tempDialogState;
+  if (!st || st.busy) return;
+  const changed = st.items.filter((i) => i.online && i.target !== i.original);
+  if (!changed.length) {
+    closeTempDialog();
+    return;
+  }
+  st.busy = true;
+  applyButton.disabled = true;
+  applyButton.textContent = "Sende …";
+  statusEl.textContent = "";
+  try {
+    const res = await fetch("/api/heating/setpoints", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: changed.map((i) => ({ id: i.id, temperature: i.target })) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      throw new Error((data.errors && data.errors.join("; ")) || data.detail || `Fehler ${res.status}`);
+    }
+    for (const item of changed) {
+      const t = thermostats.find((x) => x.id === item.id);
+      if (t) {
+        t.setpoint = item.target;
+        t.mode = "manual";
+      }
+    }
+    renderLabels();
+    closeTempDialog();
+    // die Danfoss-Cloud braucht einen Moment, bis sie die neuen Werte meldet
+    setTimeout(pollTemperatures, 8000);
+  } catch (err) {
+    st.busy = false;
+    applyButton.disabled = false;
+    applyButton.textContent = "Übernehmen";
+    statusEl.textContent = `Nicht gesetzt: ${err.message}`;
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && tempDialogState) closeTempDialog();
+});
 
 function editRoom(index) {
   if (!editing) return;
@@ -1578,6 +1757,7 @@ function stopViewer() {
     clearInterval(openingTimer);
     openingTimer = null;
   }
+  closeTempDialog();
 }
 
 viewButtons.forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));

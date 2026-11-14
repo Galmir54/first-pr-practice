@@ -136,6 +136,8 @@ def describe(device: dict) -> dict:
         "room_temp": tenths_to_c(status.get("temp_current")),
         "setpoint": setpoint,
         "battery": status.get("battery_percentage"),
+        # "Heat" = das Ventil heizt gerade, "NoHeat" = nicht
+        "heating": status.get("work_state") == "Heat",
     }
 
 

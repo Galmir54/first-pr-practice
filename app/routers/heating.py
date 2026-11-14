@@ -21,6 +21,25 @@ class HeatingActionIn(BaseModel):
     action: str
 
 
+class SetpointItem(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    temperature: float = Field(ge=heating.SETPOINT_MIN_C, le=heating.SETPOINT_MAX_C)
+
+
+class SetpointsIn(BaseModel):
+    items: list[SetpointItem] = Field(min_length=1, max_length=20)
+
+
+@router.post("/setpoints")
+async def set_setpoints(body: SetpointsIn):
+    """Solltemperatur einzelner Thermostate setzen (Antippen eines Raums im Grundriss)."""
+    try:
+        errors = await heating.set_setpoints([(i.id, i.temperature) for i in body.items])
+    except Exception as exc:
+        raise HTTPException(502, str(exc) or type(exc).__name__)
+    return {"ok": not errors, "errors": errors}
+
+
 @router.get("/config")
 def get_config():
     return heating.public_config()

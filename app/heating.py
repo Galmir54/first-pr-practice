@@ -225,6 +225,52 @@ def _invalidate() -> None:
     _thermostat_cache = None
 
 
+SETPOINT_MIN_C = 5.0
+SETPOINT_MAX_C = 30.0
+
+
+async def set_setpoints(items: list[tuple[str, float]]) -> list[str]:
+    """Stellt die Solltemperatur einzelner Thermostate ein (z.B. aus dem Grundriss).
+
+    Das Thermostat wird dafür auf "manuell" geschaltet (wie in der Ally-App) und bekommt die
+    Temperatur als manuelle Solltemperatur. Ein Thermostat, das gerade wegen Abwesenheit
+    abgesenkt ist, wird aus der gemerkten Liste genommen: der Nutzer hat dann das letzte
+    Wort, und das Zurücksetzen bei Rückkehr überschreibt die Eingabe nicht.
+    Gibt die Fehler je Thermostat zurück (leer = alles ok).
+    """
+    cfg = await asyncio.to_thread(load_config)
+    client = _get_client(cfg)
+    async with _lock:
+        devices = {d["id"]: d for d in await _thermostats(cfg)}
+        state, saved, _ = await asyncio.to_thread(_load_state)
+        errors: list[str] = []
+        for device_id, temperature in items:
+            device = devices.get(device_id)
+            if device is None:
+                errors.append(f"{device_id}: unbekanntes Thermostat")
+                continue
+            name = ally_client.describe(device)["name"]
+            if not device.get("online"):
+                errors.append(f"{name}: offline")
+                continue
+            status = ally_client.status_map(device)
+            code = "manual_mode_fast" if "manual_mode_fast" in status else "temp_set"
+            # Ally-Thermostate kennen nur halbe Grad; Zehntelgrad-Wert (215 = 21,5 °C)
+            value = int(round(min(max(temperature, SETPOINT_MIN_C), SETPOINT_MAX_C) * 2) * 5)
+            try:
+                if status.get("mode") != "manual":
+                    await _set_mode(client, device_id, "manual")
+                await client.send_commands(device_id, [(code, value)])
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+                continue
+            if device_id in saved:
+                del saved[device_id]
+                await asyncio.to_thread(_save_state, state, saved, False)
+        _invalidate()
+        return errors
+
+
 async def manual_action(action: str) -> list[str]:
     global _hold_until
     cfg = await asyncio.to_thread(load_config)
