@@ -196,6 +196,21 @@ function subsetGeometry(source, triangles) {
   return geometry;
 }
 
+function buildRestGeometry(source, triangles, triColor, fallbackColor) {
+  const geometry = subsetGeometry(source, triangles);
+  const colors = new Float32Array(triangles.length * 9);
+  triangles.forEach((t, i) => {
+    const col = triColor[t] || fallbackColor;
+    for (let v = 0; v < 3; v++) {
+      colors[i * 9 + v * 3] = col.r;
+      colors[i * 9 + v * 3 + 1] = col.g;
+      colors[i * 9 + v * 3 + 2] = col.b;
+    }
+  });
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  return geometry;
+}
+
 function buildModelGeometries(source, height) {
   const pos = source.getAttribute("position");
   const triCount = pos.count / 3;
@@ -320,17 +335,7 @@ function buildModelGeometries(source, height) {
 
   const floorGeometry = subsetGeometry(source, floorTris);
 
-  const restGeometry = subsetGeometry(source, restTris);
-  const colors = new Float32Array(restTris.length * 9);
-  restTris.forEach((t, i) => {
-    const col = triColor[t] || wallColor;
-    for (let v = 0; v < 3; v++) {
-      colors[i * 9 + v * 3] = col.r;
-      colors[i * 9 + v * 3 + 1] = col.g;
-      colors[i * 9 + v * 3 + 2] = col.b;
-    }
-  });
-  restGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  const restGeometry = buildRestGeometry(source, restTris, triColor, wallColor);
 
   // Teppiche unter Betten, Sofas und Esstischen (große Möbel)
   const rugs = [];
@@ -346,7 +351,9 @@ function buildModelGeometries(source, height) {
     if ((soft || table) && dx < 2.6 && dz < 2.6 && footprint < 4.5) rugs.push({ box: bx.clone(), seed: hash01(bx.min.x * 3.1, bx.min.z * 2.7) });
   }
 
-  return { floorGeometry, restGeometry, rugs, grid: { wallZone, minX, minZ, gw, gh } };
+  const furniture = [...groups.values()].map((g) => ({ box: g.box.clone(), tris: g.tris }));
+
+  return { floorGeometry, restGeometry, rugs, furniture, restTris, triColor, wallColor, grid: { wallZone, minX, minZ, gw, gh } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -699,11 +706,12 @@ function loadModel() {
         size: size.clone(),
       };
 
-      const { floorGeometry, restGeometry, rugs, grid } = buildModelGeometries(geometry, size.y);
+      const { floorGeometry, restGeometry, rugs, furniture, restTris, triColor, wallColor, grid } =
+        buildModelGeometries(geometry, size.y);
       addRugs(rugs);
 
       // Boden: Holzdielen, in Küche und Bad Fliesen (siehe applyFloorTypes)
-      modelData = { floorGeometry, grid };
+      modelData = { floorGeometry, grid, source: geometry, furniture, restTris, triColor, wallColor };
       floorSignature = null;
       applyFloorTypes();
 
@@ -723,6 +731,7 @@ function loadModel() {
       mesh.receiveShadow = true;
       mesh.renderOrder = 6;
       scene.add(mesh);
+      modelData.restMesh = mesh;
 
       const edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(restGeometry, 35),
@@ -735,6 +744,8 @@ function loadModel() {
       );
       edges.renderOrder = 7;
       scene.add(edges);
+      modelData.edgesMesh = edges;
+      applyCabinets();
 
       // Außenfläche rund um die Wohnung (nimmt auch den Schatten auf)
       const slab = new THREE.Mesh(
@@ -765,7 +776,7 @@ function loadModel() {
       setHint(null);
 
       // Zugriff für spätere Erweiterungen (Marker für Lampen/Steckdosen/Temperatur) und zum Testen.
-      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient };
+      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture };
     },
     undefined,
     () => {
@@ -1053,8 +1064,8 @@ function renderBadges() {
   badgeEls = openings.map((o) => {
     const el = document.createElement("div");
     el.className = `fp-badge ${o.open ? "open" : "closed"}`;
-    el.textContent = o.open ? (o.kind === "door" ? "🚪" : "🪟") : "";
-    el.title = `${o.name || (o.kind === "door" ? "Tür" : "Fenster")}: ${o.open ? "offen" : "zu"}`;
+    el.textContent = o.open ? (o.kind === "window" ? "🪟" : "🚪") : "";
+    el.title = `${openingLabel(o)}: ${o.open ? "offen" : "zu"}`;
     badgeLayer.appendChild(el);
     return el;
   });
@@ -1412,7 +1423,11 @@ openingsButton.addEventListener("click", () => setOpeningEditing(!openingEditing
 const OPENING_POLL_MS = 5000;
 const FLOOR_TOP_M = 0.1;
 const OPEN_SECONDS = 0.35;
-const OPEN_ANGLE = { door: THREE.MathUtils.degToRad(85), window: THREE.MathUtils.degToRad(70) };
+const OPEN_ANGLE = {
+  door: THREE.MathUtils.degToRad(85),
+  window: THREE.MathUtils.degToRad(70),
+  cabinet: THREE.MathUtils.degToRad(105),
+};
 const CLOSED_COLOR = 0x39ff9d;
 const OPEN_COLOR = 0xffa23a;
 
@@ -1428,6 +1443,11 @@ function getOpeningMaterials() {
   const clip = { clippingPlanes: [clipPlane], clipShadows: true };
   openingMaterials = {
     door: new THREE.MeshStandardMaterial({ color: 0xe6d3b3, roughness: 0.55, metalness: 0, ...clip }),
+    cabWhite: new THREE.MeshStandardMaterial({ color: 0xf3f3f0, roughness: 0.5, metalness: 0, ...clip }),
+    cabOak: new THREE.MeshStandardMaterial({ color: 0xb8a07e, roughness: 0.6, metalness: 0, ...clip }),
+    cabHandle: new THREE.MeshStandardMaterial({ color: 0x9c7d52, roughness: 0.5, metalness: 0, ...clip }),
+    cabInside: new THREE.MeshStandardMaterial({ color: 0xe8e6e1, roughness: 0.8, metalness: 0, side: THREE.DoubleSide, ...clip }),
+    cabMirror: new THREE.MeshStandardMaterial({ color: 0xb9ccdc, roughness: 0.05, metalness: 0.35, ...clip }),
     frame: new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.5, metalness: 0, ...clip }),
     glass: new THREE.MeshStandardMaterial({
       color: 0x9ed3ff,
@@ -1453,7 +1473,25 @@ function box(w, h, d, material, shadow = true) {
 }
 
 // Ein Flügel: Drehpunkt (pivot) an der Bandseite, der Flügel ragt zur Öffnungsmitte.
+function buildCabinetLeaf(o, mats, side, leafWidth) {
+  const y0 = o.sill;
+  const h = Math.max(0.2, o.head - o.sill);
+  const pivot = new THREE.Group();
+  pivot.position.set((side * o.width) / 2, y0, 0);
+  const leaf = new THREE.Group();
+  leaf.position.set((-side * leafWidth) / 2, h / 2, 0);
+  const material = o.style === "mirror" ? mats.cabMirror : o.style === "oak" ? mats.cabOak : mats.cabWhite;
+  leaf.add(box(leafWidth - 0.006, h, 0.02, material));
+  // senkrechter Holzgriff am freien Rand, auf der Raumseite (lokal -z)
+  const handle = box(0.022, Math.min(0.5, h * 0.35), 0.03, mats.cabHandle, false);
+  handle.position.set(-side * (leafWidth / 2 - 0.045), 0, -0.022);
+  leaf.add(handle);
+  pivot.add(leaf);
+  return { pivot, sign: side };
+}
+
 function buildLeaf(o, mats, side, leafWidth) {
+  if (o.kind === "cabinet") return buildCabinetLeaf(o, mats, side, leafWidth);
   const isDoor = o.kind === "door";
   const y0 = isDoor ? FLOOR_TOP_M : o.sill + 0.02;
   const top = isDoor ? Math.min(o.head, 2.1) - 0.02 : o.head - 0.02;
@@ -1508,6 +1546,11 @@ function buildOpening(o) {
     mats.closed
   );
   strip.position.set(0, stripY, 0);
+  if (o.kind === "cabinet") {
+    // Schranktüren zeigen ihren Zustand nur über das Symbol, der Streifen ist unsichtbar und nicht antippbar
+    strip.visible = false;
+    strip.raycast = () => {};
+  }
   group.add(strip);
 
   return { group, pivots, strip, progress: o.open ? 1 : 0, target: o.open ? 1 : 0, data: o };
@@ -1645,7 +1688,7 @@ function toggleOpening(o) {
 }
 
 function openingLabel(o) {
-  return o.name || (o.kind === "door" ? "Tür" : "Fenster");
+  return o.name || (o.kind === "door" ? "Tür" : o.kind === "window" ? "Fenster" : "Schranktür");
 }
 
 function editOpening(o) {
@@ -1725,6 +1768,132 @@ function handleOpeningTap(e) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Schränke: Das STL enthält den Schrank nur als geschlossenen Block. Der Block wird ausgeblendet
+// und durch einen echten Korpus (Rückwand, Seiten, Trennwände, Böden, Schubladen) ersetzt, damit
+// man bei offenen Türen hineinsehen kann. Die Türen selbst sind normale "Öffnungen" (kind
+// "cabinet") und haben deshalb je einen Zustand/Kontakt.
+// ---------------------------------------------------------------------------------------------
+let cabinets = [];
+let cabinetGroup = null;
+let cabinetSignature = "";
+
+function cabinetRect(c) {
+  return {
+    minX: Math.min(c.x_front, c.x_back) - 0.03,
+    maxX: Math.max(c.x_front, c.x_back) + 0.03,
+    minZ: c.z_min - 0.03,
+    maxZ: c.z_max + 0.03,
+  };
+}
+
+function buildCabinetBody(c) {
+  const mats = getOpeningMaterials();
+  const group = new THREE.Group();
+  const dir = Math.sign(c.x_front - c.x_back) || 1;
+  const depth = Math.abs(c.x_front - c.x_back);
+  const len = c.z_max - c.z_min;
+  const midX = (c.x_front + c.x_back) / 2;
+  const midZ = (c.z_min + c.z_max) / 2;
+  const bottom = FLOOR_TOP_M;
+  const inner = (w, h, d, material, x, y, z, shadow = true) => {
+    const m = box(w, h, d, material, shadow);
+    m.position.set(x, y, z);
+    group.add(m);
+    return m;
+  };
+  // Rückwand, Boden, Deckel
+  inner(0.02, c.height - bottom, len, mats.cabInside, c.x_back + dir * 0.01, (c.height + bottom) / 2, midZ);
+  inner(depth, 0.025, len, mats.cabInside, midX, bottom + 0.0125, midZ);
+  inner(depth, 0.03, len, mats.cabWhite, midX, c.height - 0.015, midZ);
+  // Seitenwände (Eiche) an beiden Enden
+  for (const z of [c.z_min + 0.0125, c.z_max - 0.0125]) {
+    inner(depth, c.height - bottom, 0.025, mats.cabOak, midX, (c.height + bottom) / 2, z);
+  }
+  // Trennwände und Einlegeböden je Fach
+  const edges = [c.z_min, ...[...c.dividers].sort((a, b) => a - b), c.z_max];
+  for (const z of c.dividers) {
+    inner(depth - 0.02, c.height - bottom, 0.018, mats.cabInside, midX + dir * 0.0, (c.height + bottom) / 2, z);
+  }
+  for (let i = 0; i < edges.length - 1; i++) {
+    const a = edges[i] + (i === 0 ? 0.025 : 0.009);
+    const b = edges[i + 1] - (i === edges.length - 2 ? 0.025 : 0.009);
+    const drawerBlock = c.drawers.find((d) => d.z_min >= edges[i] - 0.05 && d.z_max <= edges[i + 1] + 0.05);
+    const lowest = drawerBlock ? drawerBlock.height : 0.5;
+    for (const y of [lowest, lowest + 0.4, lowest + 0.8, lowest + 1.2]) {
+      if (y < c.height - 0.15) inner(depth - 0.04, 0.02, b - a, mats.cabInside, midX - dir * 0.01, y, (a + b) / 2, false);
+    }
+    // Kleiderstange im höchsten Fach ohne Schubladen
+    if (!drawerBlock) {
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, b - a, 10), mats.frame);
+      rod.rotation.x = Math.PI / 2;
+      rod.position.set(midX, c.height - 0.2, (a + b) / 2);
+      group.add(rod);
+    }
+  }
+  // Schubladen: Eichenfronten mit schmalem hellem Griff, vorn bündig mit den Türen
+  for (const d of c.drawers) {
+    const gap = 0.012;
+    const each = (d.height - bottom - gap) / d.count;
+    for (let i = 0; i < d.count; i++) {
+      const y = bottom + gap + each * i + each / 2;
+      const w = d.z_max - d.z_min - 0.012;
+      inner(0.02, each - gap, w, mats.cabOak, c.x_front + dir * 0.012, y, (d.z_min + d.z_max) / 2);
+      inner(0.015, 0.014, w * 0.5, mats.frame, c.x_front + dir * 0.03, y + each * 0.25, (d.z_min + d.z_max) / 2, false);
+    }
+  }
+  return group;
+}
+
+function applyCabinets() {
+  if (!scene || !modelData) return;
+  const signature = JSON.stringify(cabinets);
+  if (signature === cabinetSignature) return;
+  cabinetSignature = signature;
+
+  if (!cabinetGroup) {
+    cabinetGroup = new THREE.Group();
+    scene.add(cabinetGroup);
+  }
+  for (const child of [...cabinetGroup.children]) {
+    child.traverse((n) => n.geometry && n.geometry.dispose());
+  }
+  cabinetGroup.clear();
+  for (const c of cabinets) cabinetGroup.add(buildCabinetBody(c));
+
+  // alten Schrank-Block aus dem Modell nehmen: nur Dreiecke der Möbelgruppen innerhalb des Schranks
+  const pos = modelData.source.getAttribute("position");
+  const hide = new Set();
+  for (const c of cabinets) {
+    const r = cabinetRect(c);
+    for (const g of modelData.furniture) {
+      if (g.box.max.x < r.minX || g.box.min.x > r.maxX || g.box.max.z < r.minZ || g.box.min.z > r.maxZ) continue;
+      for (const t of g.tris) {
+        const cx = (pos.getX(t * 3) + pos.getX(t * 3 + 1) + pos.getX(t * 3 + 2)) / 3;
+        const cz = (pos.getZ(t * 3) + pos.getZ(t * 3 + 1) + pos.getZ(t * 3 + 2)) / 3;
+        if (cx >= r.minX && cx <= r.maxX && cz >= r.minZ && cz <= r.maxZ) hide.add(t);
+      }
+    }
+  }
+  const visible = hide.size ? modelData.restTris.filter((t) => !hide.has(t)) : modelData.restTris;
+  const geometry = buildRestGeometry(modelData.source, visible, modelData.triColor, modelData.wallColor);
+  modelData.restMesh.geometry.dispose();
+  modelData.restMesh.geometry = geometry;
+  modelData.edgesMesh.geometry.dispose();
+  modelData.edgesMesh.geometry = new THREE.EdgesGeometry(geometry, 35);
+  requestRender();
+}
+
+async function loadCabinets() {
+  try {
+    const res = await fetch("/api/floorplan/cabinets", { cache: "no-store" });
+    if (res.ok) cabinets = (await res.json()).cabinets || [];
+  } catch {
+    /* offline: vorhandene Schränke behalten */
+  }
+  applyCabinets();
+}
+
 function startViewer() {
   if (!initialized) {
     initialized = true;
@@ -1733,6 +1902,7 @@ function startViewer() {
   }
   if (!renderer) return;
   loadRooms(); // bei jedem Öffnen neu holen, damit Änderungen von anderen Geräten sichtbar sind
+  loadCabinets();
   loadOpenings();
   if (openingTimer === null) openingTimer = setInterval(loadOpenings, OPENING_POLL_MS);
   resize();

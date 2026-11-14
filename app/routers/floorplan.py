@@ -14,6 +14,7 @@ ROOMS_KEY = "floorplan.rooms"
 THERMOSTAT_ROOMS_KEY = "floorplan.thermostat_rooms"
 OPENINGS_KEY = "floorplan.openings"
 OPENING_STATE_KEY = "floorplan.opening_state"
+CABINETS_KEY = "floorplan.cabinets"
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
@@ -37,7 +38,7 @@ class Opening(BaseModel):
     """Eine Tür oder ein Fenster. Position/Maße in Metern wie die 3D-Szene."""
 
     id: str = Field(pattern=ID_PATTERN.pattern)
-    kind: str = Field(pattern="^(door|window)$")
+    kind: str = Field(pattern="^(door|window|cabinet)$")
     x: float
     z: float
     width: float = Field(gt=0.2, lt=6)
@@ -49,6 +50,37 @@ class Opening(BaseModel):
     hinge: int = Field(default=1, ge=-1, le=1)  # auf welcher Seite die Bänder sitzen
     swing: int = Field(default=1, ge=-1, le=1)  # in welche Richtung der Flügel aufschwingt
     name: str = Field(default="", max_length=40)
+    # nur für Schranktüren (kind "cabinet"): Aussehen der Front
+    style: str = Field(default="white", pattern="^(white|mirror|oak)$")
+
+
+class Cabinet(BaseModel):
+    """Ein Schrank: feste Teile (Korpus, Böden, Schubladen). Die Türen sind eigene Einträge
+    (kind "cabinet") in den Türen/Fenstern, damit jede Tür ihren eigenen Kontakt hat."""
+
+    id: str = Field(pattern=ID_PATTERN.pattern)
+    name: str = Field(default="", max_length=40)
+    x_front: float  # Vorderkante (zum Raum hin, in +x)
+    x_back: float  # Rückwand (an der Wand)
+    z_min: float
+    z_max: float
+    height: float = Field(gt=0.3, lt=3.5)
+    dividers: list[float] = Field(default_factory=list, max_length=12)  # z-Lage der Trennwände
+    drawers: list["DrawerBlock"] = Field(default_factory=list, max_length=6)
+
+
+class DrawerBlock(BaseModel):
+    z_min: float
+    z_max: float
+    count: int = Field(default=3, ge=1, le=6)
+    height: float = Field(default=0.78, gt=0.1, lt=2)
+
+
+Cabinet.model_rebuild()
+
+
+class CabinetsIn(BaseModel):
+    cabinets: list[Cabinet] = Field(max_length=10)
 
 
 class OpeningsIn(BaseModel):
@@ -150,6 +182,18 @@ async def put_openings(body: OpeningsIn):
         for o in body.openings
     ]
     return await asyncio.to_thread(_openings_put, items)
+
+
+@router.get("/cabinets")
+async def get_cabinets():
+    return {"cabinets": await asyncio.to_thread(_load, CABINETS_KEY, [])}
+
+
+@router.put("/cabinets")
+async def put_cabinets(body: CabinetsIn):
+    items = [c.model_dump() for c in body.cabinets]
+    await asyncio.to_thread(_save, CABINETS_KEY, items)
+    return {"cabinets": items}
 
 
 @router.put("/openings/{opening_id}/state")
