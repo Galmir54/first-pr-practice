@@ -113,6 +113,10 @@ class Tv(BaseModel):
     facing: str = Field(default="+z", pattern=r"^[+-][xz]$")
     wall_x: float | None = None
     wall_z: float | None = None
+    # Blickrichtung als Winkel in Grad (überschreibt `facing`, z.B. 45 = diagonal in einer Ecke) und
+    # Länge eines Haltearms nach hinten (Eckhalterung), 0 = direkt an der Wand
+    yaw: float | None = Field(default=None, ge=-360, le=360)
+    arm: float = Field(default=0, ge=0, lt=3)
     y_bottom: float = Field(default=1.1, ge=0, lt=3)
     device_id: int | None = None
     on_watts: float = Field(default=40, gt=0, lt=5000)

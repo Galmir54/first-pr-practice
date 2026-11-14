@@ -2199,6 +2199,7 @@ function buildWallTv(t) {
     holder.add(mesh);
   };
   add(0.2, 0.2, 0.03, m.black, 0, yMid, 0.015, false); // Halterung an der Wand
+  if (t.arm > 0) add(0.05, 0.05, t.arm, m.black, 0, yMid, -t.arm / 2, false); // Haltearm bis zur Ecke
   add(t.tv_width, t.tv_height, 0.05, m.black, 0, yMid, 0.055); // Gehäuse
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(t.tv_width - 0.04, t.tv_height - 0.04), m.off);
   screen.position.set(0, yMid, 0.0805);
@@ -2222,7 +2223,8 @@ function buildWallTv(t) {
   holder.add(glow);
 
   holder.position.set(t.wall_x, 0, t.wall_z);
-  holder.rotation.y = { "+z": 0, "-z": Math.PI, "+x": Math.PI / 2, "-x": -Math.PI / 2 }[t.facing] ?? 0;
+  holder.rotation.y =
+    t.yaw != null ? (t.yaw * Math.PI) / 180 : { "+z": 0, "-z": Math.PI, "+x": Math.PI / 2, "-x": -Math.PI / 2 }[t.facing] ?? 0;
   return { group: holder, screen, glow, state: null };
 }
 
