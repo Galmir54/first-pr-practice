@@ -50,6 +50,7 @@ for off, ang in ((-1, 23), (0, 45), (1, 67)):
 # darauf Flugzeugträger (oben), Kreuzer (Mitte), Zerstörer und U-Boot (unten). Maßstab aus dem Foto
 # geschätzt: 1 Pixel = 0,614 mm, linke Kante an der Schranktür (z 1,88), Bug zeigt zum Schrank (+z).
 SX = WX + 0.07  # Mitte der Bretter (Tiefe 0,14 m)
+LIFT = 0.26  # Regal höher gehängt: das unterste Brett hängt über den Monitoren (Oberkante Monitor 1,27 m)
 
 
 def zpx(px):  # Bildpixel (waagerecht) -> z in Metern
@@ -57,15 +58,15 @@ def zpx(px):  # Bildpixel (waagerecht) -> z in Metern
 
 
 def ypx(py):  # Bildpixel (senkrecht) -> Höhe über dem Boden in Metern
-    return 1.10 + (1330 - py) * 0.000614
+    return 1.10 + LIFT + (1330 - py) * 0.000614
 
 
 # Rückwand und Latten
-box(WX, WX + 0.012, 1.03, 1.87, 1.19, 1.81, "wood")
-box(WX, WX + 0.012, 1.15, 1.80, 1.09, 1.20, "wood")
+box(WX, WX + 0.012, 1.03, 1.87, 1.19 + LIFT, 1.81 + LIFT, "wood")
+box(WX, WX + 0.012, 1.15, 1.80, 1.09 + LIFT, 1.20 + LIFT, "wood")
 for py0, py1, p0, p1 in ((235, 290, 495, 1525), (620, 680, 495, 1515), (690, 745, 495, 1520), (750, 810, 495, 1515)):
     box(WX + 0.012, WX + 0.022, zpx(p1), zpx(p0), ypx(py1), ypx(py0), "wood")
-SHELVES = ((1.594, 305, 1445), (1.272, 345, 1500), (1.109, 350, 1495))  # Oberkante, linke/rechte Kante (px)
+SHELVES = ((1.594 + LIFT, 305, 1445), (1.272 + LIFT, 345, 1500), (1.109 + LIFT, 350, 1495))  # Oberkante, linke/rechte Kante (px)
 for top, p0, p1 in SHELVES:
     box(WX + 0.012, WX + 0.14, zpx(p1), min(zpx(p0), 1.87), top - 0.016, top, "wood")
 
