@@ -1096,7 +1096,7 @@ button.danger-link {
   font-size: 0.55rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: #fff;
 }
 
 .fp-room-temp {
@@ -1110,7 +1110,7 @@ button.danger-link {
 
 .fp-room-set {
   font-size: 0.5rem;
-  color: var(--text-dim);
+  color: #fff;
 }
 
 .fp-room.unnamed .fp-room-name {
