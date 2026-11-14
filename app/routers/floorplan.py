@@ -152,7 +152,7 @@ class Part(BaseModel):
     z1: float
     y0: float = Field(ge=0, lt=4)
     y1: float = Field(gt=0, lt=4)
-    mat: str = Field(default="white", pattern="^(white|chrome|black|wood|ship|hull|sail|red)$")
+    mat: str = Field(default="white", pattern="^(white|chrome|black|wood|ship|hull|sail|red|gray|rust|brass)$")
     rot: float = Field(default=0, ge=-360, le=360)
 
 

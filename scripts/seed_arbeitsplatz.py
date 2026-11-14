@@ -46,71 +46,107 @@ SPACING = 0.34
 for off, ang in ((-1, 23), (0, 45), (1, 67)):
     monitor(mx + P[0] * SPACING * 1.4 * off, mz + P[1] * SPACING * 1.4 * off, 0.54, -ang)
 
-# Regal mit Schiffsmodellen an der Westwand über dem Schreibtisch
-box(WX, WX + 0.02, 1.16, 1.86, 1.05, 1.95, "wood")
-SHIP_X = WX + 0.085  # Mitte der Regalbretter (Tiefe 0,14 m)
+# Regal mit Schiffsmodellen an der Westwand (nach Foto): Rückwand aus weiß lasierten Latten, drei Bretter,
+# darauf Flugzeugträger (oben), Kreuzer (Mitte), Zerstörer und U-Boot (unten). Maßstab aus dem Foto
+# geschätzt: 1 Pixel = 0,614 mm, linke Kante an der Schranktür (z 1,88), Bug zeigt zum Schrank (+z).
+SX = WX + 0.07  # Mitte der Bretter (Tiefe 0,14 m)
 
 
-def ship(zc, length, kind, yb):
-    """Kleines Modellschiff aus Quadern auf einem Brett (Bug zeigt nach +z, yb = Oberkante Brett)."""
-    L = length
-
-    def b(dz, w, l, y0, y1, mat):
-        box(SHIP_X - w / 2, SHIP_X + w / 2, zc + dz - l / 2, zc + dz + l / 2, yb + y0, yb + y1, mat)
-
-    hull = "ship" if kind == "steamer" else "hull"
-    # Rumpf: Kiel, Mittelteil, Deck, spitzer Bug und Heckaufbau
-    b(0, 0.030, 0.72 * L, 0.000, 0.012, hull)
-    b(0, 0.050, 0.90 * L, 0.012, 0.026, hull)
-    b(0, 0.062, L, 0.026, 0.040, hull)
-    b(0.5 * L + 0.012, 0.034, 0.05, 0.026, 0.040, hull)
-    b(0.5 * L + 0.034, 0.014, 0.04, 0.032, 0.040, hull)
-    b(0, 0.064, 0.96 * L, 0.033, 0.037, "red" if kind != "sloop" else "white")  # Zierstreifen
-    b(-0.40 * L, 0.060, 0.18 * L, 0.040, 0.062, hull)  # Heckaufbau
-    if kind == "steamer":
-        b(-0.05 * L, 0.050, 0.34 * L, 0.040, 0.075, "white")
-        b(0.18 * L, 0.040, 0.14 * L, 0.040, 0.066, "white")
-        b(0.05 * L, 0.040, 0.10 * L, 0.075, 0.095, "white")  # Brücke
-        for dz in (-0.12 * L, -0.02 * L):
-            b(dz, 0.022, 0.03, 0.075, 0.120, "black")  # Schornsteine
-            b(dz, 0.024, 0.032, 0.108, 0.114, "red")
-        b(0.30 * L, 0.006, 0.006, 0.040, 0.100, "black")
-        return
-
-    def mast(dz, h):
-        b(dz, 0.007, 0.007, 0.040, h, "wood" if kind != "sloop" else "white")
-
-    def square_sails(dz, h, mat):
-        low_top = 0.062 + 0.55 * (h - 0.062)
-        b(dz + 0.010, 0.074, 0.022, 0.062, low_top, mat)
-        b(dz + 0.008, 0.052, 0.018, low_top + 0.008, h - 0.004, mat)
-        b(dz + 0.004, 0.082, 0.006, low_top - 0.002, low_top + 0.002, "wood")  # Rah
-
-    if kind == "tall":
-        for dz, h in ((-0.26 * L, 0.17), (0.0, 0.21), (0.26 * L, 0.16)):
-            mast(dz, h)
-            square_sails(dz, h, "sail")
-        b(0.5 * L + 0.045, 0.006, 0.07, 0.036, 0.046, "wood")  # Klüverbaum
-    elif kind == "schooner":
-        for dz, h in ((-0.12 * L, 0.20), (0.22 * L, 0.18)):
-            mast(dz, h)
-            for i in range(7):  # Gaffelsegel hinter dem Mast, nach oben schmaler
-                y0 = 0.05 + i * (h - 0.06) / 7
-                f = 1 - i / 8.0
-                b(dz - 0.005 - 0.075 * f, 0.004, 0.15 * f, y0, y0 + (h - 0.06) / 7, "red")
-        b(0.5 * L + 0.045, 0.006, 0.07, 0.036, 0.046, "wood")
-    else:  # sloop: ein Mast, dreieckiges Groß- und Vorsegel aus gestapelten Streifen
-        mast(0.0, 0.24)
-        for i in range(8):
-            y0 = 0.05 + i * 0.022
-            f = 1 - i / 8.0
-            b(-0.02 - 0.09 * f, 0.004, 0.18 * f, y0, y0 + 0.022, "sail")  # Großsegel hinter dem Mast
-            b(0.02 + 0.07 * (1 - i / 9.0), 0.004, 0.14 * (1 - i / 9.0), y0, y0 + 0.022, "sail")  # Fock
+def zpx(px):  # Bildpixel (waagerecht) -> z in Metern
+    return 1.88 - (px - 325) * 0.000614
 
 
-for y, kind, length in ((1.10, "steamer", 0.50), (1.38, "sloop", 0.40), (1.66, "tall", 0.52), (1.94, "schooner", 0.46)):
-    box(WX + 0.02, WX + 0.16, 1.16, 1.86, y - 0.01, y + 0.01, "wood")
-    ship(1.51, length, kind, y + 0.01)
+def ypx(py):  # Bildpixel (senkrecht) -> Höhe über dem Boden in Metern
+    return 1.10 + (1330 - py) * 0.000614
+
+
+# Rückwand und Latten
+box(WX, WX + 0.012, 1.03, 1.87, 1.19, 1.81, "wood")
+box(WX, WX + 0.012, 1.15, 1.80, 1.09, 1.20, "wood")
+for py0, py1, p0, p1 in ((235, 290, 495, 1525), (620, 680, 495, 1515), (690, 745, 495, 1520), (750, 810, 495, 1515)):
+    box(WX + 0.012, WX + 0.022, zpx(p1), zpx(p0), ypx(py1), ypx(py0), "wood")
+SHELVES = ((1.594, 305, 1445), (1.272, 345, 1500), (1.109, 350, 1495))  # Oberkante, linke/rechte Kante (px)
+for top, p0, p1 in SHELVES:
+    box(WX + 0.012, WX + 0.14, zpx(p1), min(zpx(p0), 1.87), top - 0.016, top, "wood")
+
+CUR = {"y": 0.0}
+
+
+def bx(zc, w, l, y0, y1, mat, dx=0.0):
+    box(SX + dx - w / 2, SX + dx + w / 2, zc - l / 2, zc + l / 2, CUR["y"] + y0, CUR["y"] + y1, mat)
+
+
+def hull(zb, zs, y0, y1, beam, mat, n=12, bow_start=0.6, bow_tip=0.08):
+    """Rumpfschicht mit spitzem Bug und leicht schmalerem Heck, aus n Quadern entlang z."""
+    length = zb - zs
+    for i in range(n):
+        t = (i + 0.5) / n
+        if t < 0.12:
+            f = 0.7 + 0.3 * t / 0.12
+        elif t < bow_start:
+            f = 1.0
+        else:
+            f = 1 - (1 - bow_tip) * ((t - bow_start) / (1 - bow_start)) ** 1.3
+        z0, z1 = zs + length * i / n, zs + length * (i + 1) / n
+        box(SX - beam * f / 2, SX + beam * f / 2, z0, z1, CUR["y"] + y0, CUR["y"] + y1, mat)
+
+
+def carrier(top):
+    CUR["y"] = top
+    bx(1.50, 0.05, 0.20, 0.0, 0.04, "gray")  # Ständer
+    zb, zs = 1.855, 1.14
+    hull(zb - 0.03, zs + 0.02, 0.040, 0.061, 0.050, "rust")
+    hull(zb, zs, 0.061, 0.086, 0.070, "gray")
+    hull(zb - 0.02, zs, 0.086, 0.092, 0.090, "ship", bow_start=0.8, bow_tip=0.3)  # Flugdeck
+    bx(1.54, 0.030, 0.15, 0.092, 0.115, "gray", 0.026)  # Insel
+    bx(1.52, 0.020, 0.035, 0.115, 0.135, "gray", 0.026)  # Schornstein
+    bx(1.62, 0.008, 0.012, 0.092, 0.180, "gray", 0.026)  # Mast
+    bx(1.62, 0.022, 0.006, 0.150, 0.158, "gray", 0.026)
+
+
+def cruiser(top):
+    CUR["y"] = top
+    bx(1.505, 0.040, 0.19, 0.0, 0.04, "hull")  # Holzständer
+    zb, zs = 1.818, 1.136
+    hull(zb - 0.03, zs + 0.02, 0.040, 0.063, 0.040, "rust")
+    hull(zb, zs, 0.063, 0.089, 0.056, "gray")
+    bx(1.60, 0.030, 0.40, 0.089, 0.093, "hull")  # Deck-Holzbelag
+    bx(1.631, 0.030, 0.045, 0.089, 0.108, "ship")  # Turm A
+    bx(1.552, 0.034, 0.050, 0.089, 0.157, "ship")  # Brückenturm
+    bx(1.500, 0.024, 0.040, 0.089, 0.147, "gray")  # Schornstein
+    bx(1.420, 0.034, 0.090, 0.089, 0.110, "ship")  # Achteraufbau
+    bx(1.435, 0.008, 0.010, 0.110, 0.224, "ship")  # Großmast
+    bx(1.435, 0.024, 0.005, 0.190, 0.196, "ship")
+    bx(1.330, 0.030, 0.045, 0.089, 0.105, "ship")  # Turm C
+    bx(1.265, 0.030, 0.045, 0.089, 0.105, "ship")  # Turm D
+
+
+def destroyer(top):
+    CUR["y"] = top
+    bx(1.37, 0.030, 0.10, 0.0, 0.03, "gray")
+    zb, zs = 1.57, 1.158
+    hull(zb - 0.02, zs + 0.02, 0.030, 0.045, 0.030, "rust")
+    hull(zb, zs, 0.045, 0.070, 0.040, "gray")
+    bx(1.53, 0.020, 0.030, 0.070, 0.082, "ship")  # Bugkanone
+    bx(1.465, 0.026, 0.070, 0.070, 0.095, "ship")  # Brücke
+    bx(1.45, 0.006, 0.008, 0.095, 0.115, "ship")  # Mast
+    for zc in (1.370, 1.335):
+        bx(zc, 0.014, 0.020, 0.070, 0.100, "gray")  # Schornsteine
+    bx(1.290, 0.020, 0.030, 0.070, 0.082, "ship")
+    bx(1.250, 0.020, 0.030, 0.070, 0.082, "ship")
+
+
+def uboat(top):
+    CUR["y"] = top
+    hull(1.806, 1.594, 0.004, 0.026, 0.026, "ship", n=10, bow_start=0.7, bow_tip=0.2)
+    bx(1.70, 0.014, 0.026, 0.026, 0.044, "ship")  # Turm
+    bx(1.70, 0.012, 0.070, 0.0, 0.003, "brass", 0.03)  # Messingschild davor
+
+
+carrier(SHELVES[0][0])
+cruiser(SHELVES[1][0])
+destroyer(SHELVES[2][0])
+uboat(SHELVES[2][0])
 
 prop = dict(id="arbeitsplatz", name="Arbeitsplatz Schlafzimmer", parts=parts,
             cutout=dict(x0=-2.12, x1=-1.12, z0=0.20, z1=1.76))

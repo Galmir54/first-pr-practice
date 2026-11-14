@@ -2394,6 +2394,9 @@ function getPropMaterials() {
     hull: std(0x5b3a24, 0.6),
     sail: std(0xf1e8cf, 0.8),
     red: std(0x9e2f2a, 0.6),
+    gray: std(0xa4a9ad, 0.55),
+    rust: std(0x6b2b27, 0.6),
+    brass: std(0xb08d3c, 0.35, 0.6),
   };
   return propMaterials;
 }
