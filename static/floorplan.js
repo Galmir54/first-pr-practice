@@ -23,7 +23,7 @@ const DEFAULT_CUT_M = Infinity;
 
 const COLORS = {
   wall: 0xf7f5f1, // warmes Weiß
-  wallTop: 0xc9d3dc,
+  wallTop: 0xeef1f4,
   edge: 0x1a2a38,
 };
 
@@ -79,11 +79,11 @@ function initScene() {
   camera = new THREE.PerspectiveCamera(38, 1, 0.1, 600);
 
   // helles, freundliches Licht: kräftiges Umgebungslicht, weiche Sonne von vorn-rechts, Gegenlicht ohne Schatten
-  scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x6b5a4a, 1.45));
+  scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x6b5a4a, 1.75));
   const fill = new THREE.DirectionalLight(0xdbe8ff, 0.7);
   fill.position.set(-10, 9, -6);
   scene.add(fill);
-  const sun = new THREE.DirectionalLight(0xfff1de, 1.85);
+  const sun = new THREE.DirectionalLight(0xfff1de, 1.35);
   sun.position.set(9, 16, 7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -339,7 +339,117 @@ function buildModelGeometries(source, height) {
   });
   restGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-  return { floorGeometry, restGeometry, furnitureCount: [...groups.values()].filter((g) => g.box.max.y < FURNITURE_MAX_Y).length };
+  // Teppiche unter Betten, Sofas und Esstischen (große Möbel)
+  const rugs = [];
+  for (const g of groups.values()) {
+    const bx = g.box;
+    if (bx.max.y >= FURNITURE_MAX_Y) continue;
+    const dx = bx.max.x - bx.min.x;
+    const dz = bx.max.z - bx.min.z;
+    const footprint = dx * dz;
+    const soft = bx.max.y <= 0.8 && footprint > 1.0;
+    const table = bx.max.y > 0.65 && bx.max.y <= 1.2 && footprint > 1.2;
+    // zu große "Möbel" sind in Wirklichkeit mehrere zusammenhängende Teile: dafür kein Teppich
+    if ((soft || table) && dx < 2.6 && dz < 2.6 && footprint < 4.5) rugs.push({ box: bx.clone(), seed: hash01(bx.min.x * 3.1, bx.min.z * 2.7) });
+  }
+
+  return { floorGeometry, restGeometry, rugs };
+}
+
+// Teppich-Muster (Bordüre + Mittelfeld) in wenigen Farbvarianten
+const RUG_PALETTES = [
+  ["#8c3b36", "#d9c4a0", "#3b2a2a"],
+  ["#4d6a86", "#e8dcc6", "#2a3948"],
+  ["#7a8a6a", "#e9e0cc", "#3d4634"],
+  ["#b98a63", "#f0e6d4", "#5a4030"],
+];
+const rugTextures = new Map();
+
+function getRugTexture(index) {
+  if (rugTextures.has(index)) return rugTextures.get(index);
+  const [main, light, dark] = RUG_PALETTES[index];
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = light;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = main;
+  ctx.fillRect(10, 10, 236, 236);
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = 5;
+  ctx.strokeRect(22, 22, 212, 212);
+  ctx.fillStyle = light;
+  ctx.globalAlpha = 0.9;
+  ctx.fillRect(40, 40, 176, 176);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = main;
+  ctx.beginPath();
+  ctx.moveTo(128, 52);
+  ctx.lineTo(204, 128);
+  ctx.lineTo(128, 204);
+  ctx.lineTo(52, 128);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.moveTo(128, 90);
+  ctx.lineTo(166, 128);
+  ctx.lineTo(128, 166);
+  ctx.lineTo(90, 128);
+  ctx.closePath();
+  ctx.fill();
+  // Fransen
+  ctx.fillStyle = light;
+  for (let i = 0; i < 256; i += 8) {
+    ctx.fillRect(i, 0, 4, 6);
+    ctx.fillRect(i, 250, 4, 6);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  rugTextures.set(index, texture);
+  return texture;
+}
+
+function addRugs(rugs) {
+  const margin = 0.3;
+  for (const rug of rugs) {
+    const w = rug.box.max.x - rug.box.min.x + margin * 2;
+    const d = rug.box.max.z - rug.box.min.z + margin * 2;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, d),
+      new THREE.MeshStandardMaterial({
+        map: getRugTexture(Math.floor(rug.seed * RUG_PALETTES.length) % RUG_PALETTES.length),
+        roughness: 1,
+        metalness: 0,
+        clippingPlanes: [clipPlane],
+      })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set((rug.box.min.x + rug.box.max.x) / 2, 0.122, (rug.box.min.z + rug.box.max.z) / 2);
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 5;
+    scene.add(mesh);
+  }
+}
+
+// Blaue Außenfläche (Grundstück/Terrasse) rund um die Wohnung, wie auf den Home-Assistant-Plänen
+function makeGroundTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#2f5f86";
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2600; i++) {
+    const tone = 40 + Math.floor(hash01(i, 1.7) * 60);
+    ctx.fillStyle = `rgba(${tone},${tone + 40},${tone + 90},0.22)`;
+    ctx.fillRect(hash01(i, 2.9) * 256, hash01(i, 5.3) * 256, 2, 2);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(10, 10);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 // Holzdielen als Textur (Eiche, versetzte Stöße, leichte Maserung) - einmal erzeugt, überall wiederholt.
@@ -406,7 +516,8 @@ function loadModel() {
         size: size.clone(),
       };
 
-      const { floorGeometry, restGeometry } = buildModelGeometries(geometry, size.y);
+      const { floorGeometry, restGeometry, rugs } = buildModelGeometries(geometry, size.y);
+      addRugs(rugs);
 
       // Boden mit Holzdielen-Textur
       const floorMesh = new THREE.Mesh(
@@ -452,15 +563,15 @@ function loadModel() {
       edges.renderOrder = 7;
       scene.add(edges);
 
-      // Unsichtbare Fläche, die nur den Schattenwurf der Wohnung auf dem Hintergrund zeigt
-      const ground = new THREE.Mesh(
-        new THREE.CircleGeometry(bounds.radius * 3, 72),
-        new THREE.ShadowMaterial({ color: 0x050d16, opacity: 0.38 })
+      // Außenfläche rund um die Wohnung (nimmt auch den Schatten auf)
+      const slab = new THREE.Mesh(
+        new THREE.PlaneGeometry(size.x + 4.4, size.z + 4.4),
+        new THREE.MeshStandardMaterial({ map: makeGroundTexture(), roughness: 1, metalness: 0 })
       );
-      ground.rotation.x = -Math.PI / 2;
-      ground.position.y = -0.03;
-      ground.receiveShadow = true;
-      scene.add(ground);
+      slab.rotation.x = -Math.PI / 2;
+      slab.position.y = -0.02;
+      slab.receiveShadow = true;
+      scene.add(slab);
 
       // Schatten-Kamera passend zur Modellgröße
       const sun = scene.userData.sun;
@@ -476,7 +587,7 @@ function loadModel() {
       cutSlider.max = String(bounds.height.toFixed(2));
       resetCut();
 
-      setView("iso");
+      setView("top");
       toolbar.classList.remove("hidden");
       setHint(null);
 
@@ -508,6 +619,10 @@ function applyCut(heightM) {
 
 function setView(kind) {
   if (!bounds) return;
+  // Draufsicht mit engem Blickwinkel (fast orthogonal wie ein gerenderter Plan): die Wände zeigen
+  // dann kaum Innenflächen und man sieht in alle Räume.
+  camera.fov = kind === "top" ? 20 : 38;
+  camera.updateProjectionMatrix();
   const vfov = THREE.MathUtils.degToRad(camera.fov);
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
   const fit = (radius) => (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.08;
@@ -608,6 +723,9 @@ function tempColor(c) {
 
 const fmt = (v) => v.toFixed(1).replace(".", ",");
 
+const THERMOMETER_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/></svg>';
+
 function renderLabels() {
   labelLayer.replaceChildren();
   labelEls = rooms.map((room, index) => {
@@ -616,31 +734,47 @@ function renderLabels() {
     const named = norm(room.name) !== "";
     el.className = "fp-room" + (named ? "" : " unnamed") + (editing ? " editing" : "");
 
+    const live = ts.filter((t) => typeof t.room_temp === "number");
+    if (live.length) {
+      el.style.setProperty("--temp", tempColor(live.reduce((s, t) => s + t.room_temp, 0) / live.length));
+      const icon = document.createElement("div");
+      icon.className = "fp-room-icon";
+      icon.innerHTML = THERMOMETER_SVG;
+      el.appendChild(icon);
+    }
+
+    // Runder Wert (wie die Symbolfelder in den Home-Assistant-Plänen): Zahl im Kreis, Einheit als Etikett
+    if (live.length || (named && ts.length) || !named) {
+      const circle = document.createElement("div");
+      circle.className = "fp-room-circle" + (live.length > 1 ? " multi" : "");
+      const value = document.createElement("span");
+      value.className = "fp-room-value";
+      if (live.length) value.textContent = live.map((t) => fmt(t.room_temp)).join(" / ");
+      else if (named) {
+        value.textContent = "offline";
+        el.classList.add("offline");
+      } else value.textContent = String(index + 1);
+      circle.appendChild(value);
+      if (live.length) {
+        const unit = document.createElement("span");
+        unit.className = "fp-room-unit";
+        unit.textContent = "°C";
+        circle.appendChild(unit);
+      }
+      el.appendChild(circle);
+    }
+
     const name = document.createElement("div");
     name.className = "fp-room-name";
     name.textContent = named ? room.name : `Raum ${index + 1}`;
     el.appendChild(name);
 
-    const live = ts.filter((t) => typeof t.room_temp === "number");
-    if (live.length) {
-      const temp = document.createElement("div");
-      temp.className = "fp-room-temp";
-      temp.textContent = live.map((t) => fmt(t.room_temp)).join(" / ") + " °C";
-      el.style.setProperty("--temp", tempColor(live.reduce((s, t) => s + t.room_temp, 0) / live.length));
-      el.appendChild(temp);
-      const sets = ts.filter((t) => typeof t.setpoint === "number");
-      if (sets.length) {
-        const set = document.createElement("div");
-        set.className = "fp-room-set";
-        set.textContent = "Soll " + sets.map((t) => fmt(t.setpoint)).join(" / ");
-        el.appendChild(set);
-      }
-    } else if (named && ts.length) {
-      el.classList.add("offline");
-      const temp = document.createElement("div");
-      temp.className = "fp-room-temp";
-      temp.textContent = "offline";
-      el.appendChild(temp);
+    const sets = ts.filter((t) => typeof t.setpoint === "number");
+    if (live.length && sets.length) {
+      const set = document.createElement("div");
+      set.className = "fp-room-set";
+      set.textContent = "Soll " + sets.map((t) => fmt(t.setpoint)).join(" / ");
+      el.appendChild(set);
     }
 
     el.addEventListener("click", () => editRoom(index));
@@ -1276,7 +1410,7 @@ viewButtons.forEach((button) => button.addEventListener("click", () => setView(b
 document.getElementById("fpReset").addEventListener("click", () => {
   if (!bounds) return;
   resetCut();
-  setView("iso");
+  setView("top");
 });
 cutSlider.addEventListener("input", () => applyCut(parseFloat(cutSlider.value)));
 

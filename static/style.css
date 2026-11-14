@@ -1113,16 +1113,68 @@ button.danger-link {
   flex-direction: column;
   align-items: center;
   gap: 0;
-  padding: 3px 7px 4px;
-  min-width: 46px;
   text-align: center;
   white-space: nowrap;
-  background: rgba(10, 22, 33, 0.86);
-  border: 1.5px solid color-mix(in srgb, var(--temp) 70%, transparent);
-  border-radius: 11px;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 12px color-mix(in srgb, var(--temp) 35%, transparent);
-  --temp: var(--text);
+  --temp: #8fb8e8;
+}
+
+/* Thermometer-Symbol sitzt auf dem oberen Rand des Kreises */
+.fp-room-icon {
+  width: 22px;
+  height: 22px;
+  margin-bottom: -9px;
+  z-index: 1;
+  color: var(--temp);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--temp) 70%, transparent));
+}
+
+.fp-room-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* runder Wert: Zahl im Kreis, Einheit als Etikett am unteren Rand */
+.fp-room-circle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 60px;
+  height: 60px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border-radius: 30px;
+  background: rgba(20, 38, 56, 0.62);
+  border: 3px solid rgba(70, 130, 190, 0.75);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+
+.fp-room-value {
+  font-size: 1.15rem;
+  font-weight: 500;
+  line-height: 1;
+  color: #fff;
+  padding-bottom: 6px;
+}
+
+.fp-room-circle.multi .fp-room-value {
+  font-size: 0.95rem;
+}
+
+.fp-room-unit {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  padding: 1px 9px 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #fff;
+  background: #3d78b3;
+  border: 1.5px solid rgba(20, 38, 56, 0.9);
+  border-radius: 10px;
 }
 
 /* Runde Status-Symbole über Türen und Fenstern */
@@ -1154,8 +1206,8 @@ button.danger-link {
   place-items: center;
   font-size: 0.95rem;
   line-height: 1;
-  background: rgba(255, 162, 58, 0.95);
-  border: 2px solid #fff;
+  background: rgba(20, 38, 56, 0.85);
+  border: 3px solid #ffa23a;
   box-shadow: 0 0 14px rgba(255, 162, 58, 0.9), 0 3px 8px rgba(0, 0, 0, 0.45);
   animation: fp-badge-pulse 1.8s ease-in-out infinite;
 }
@@ -1173,38 +1225,37 @@ button.danger-link {
 .fp-room.editing {
   pointer-events: auto;
   cursor: pointer;
-  border-style: dashed;
+}
+
+.fp-room.editing .fp-room-circle,
+.fp-room.editing .fp-room-name {
   border-color: var(--sum);
+  outline: 2px dashed var(--sum);
+  outline-offset: 2px;
 }
 
 .fp-room-name {
-  font-size: 0.55rem;
+  margin-top: 12px;
+  font-size: 0.6rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #fff;
-}
-
-.fp-room-temp {
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-  font-weight: 700;
-  line-height: 1.15;
-  color: var(--temp);
-  text-shadow: 0 0 10px color-mix(in srgb, var(--temp) 55%, transparent);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
 }
 
 .fp-room-set {
-  font-size: 0.5rem;
-  color: #fff;
+  font-size: 0.52rem;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
 }
 
 .fp-room.unnamed .fp-room-name {
   color: var(--sum);
 }
 
-.fp-room.offline .fp-room-temp {
+.fp-room.offline .fp-room-value {
+  font-size: 0.8rem;
   color: var(--text-dim);
-  text-shadow: none;
 }
 
 .fp-edit-hint {
