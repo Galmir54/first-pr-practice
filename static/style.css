@@ -1068,7 +1068,7 @@ button.danger-link {
   position: absolute;
   left: 0;
   top: 0;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(var(--fp-scale, 1));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1178,6 +1178,10 @@ button.danger-link {
 
 .fp-legend-note {
   opacity: 0.75;
+}
+
+.fp-slider-value-small {
+  min-width: 48px !important;
 }
 
 .fp-slider-value {

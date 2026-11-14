@@ -537,6 +537,33 @@ function setupRoomEditing() {
   });
 }
 
+// Größe der Temperaturschilder: pro Gerät einstellbar (Tablet und PC brauchen unterschiedliche Größen).
+const labelScaleSlider = document.getElementById("fpLabelScale");
+const labelScaleValue = document.getElementById("fpLabelScaleValue");
+const LABEL_SCALE_KEY = "fp.labelScale";
+
+function applyLabelScale(scale) {
+  const s = Math.min(1.8, Math.max(0.6, scale || 1));
+  labelLayer.style.setProperty("--fp-scale", String(s));
+  labelScaleSlider.value = String(s);
+  labelScaleValue.textContent = `${Math.round(s * 100)} %`;
+  return s;
+}
+
+try {
+  applyLabelScale(parseFloat(localStorage.getItem(LABEL_SCALE_KEY)));
+} catch {
+  applyLabelScale(1);
+}
+labelScaleSlider.addEventListener("input", () => {
+  const s = applyLabelScale(parseFloat(labelScaleSlider.value));
+  try {
+    localStorage.setItem(LABEL_SCALE_KEY, String(s));
+  } catch {
+    /* ohne Speicher gilt die Einstellung nur bis zum Neuladen */
+  }
+});
+
 roomsButton.addEventListener("click", () => setEditing(!editing));
 openingsButton.addEventListener("click", () => setOpeningEditing(!openingEditing));
 
