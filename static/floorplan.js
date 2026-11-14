@@ -2397,6 +2397,7 @@ function getPropMaterials() {
     gray: std(0xa4a9ad, 0.55),
     rust: std(0x6b2b27, 0.6),
     brass: std(0xb08d3c, 0.35, 0.6),
+    chip: std(0xd3c7ab, 0.8),
   };
   return propMaterials;
 }

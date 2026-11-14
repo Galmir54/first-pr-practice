@@ -26,9 +26,14 @@ def oriented(cx, cz, w, d, y0, y1, mat, rot):
 TOP0, TOP1 = 0.73, 0.76
 # weiße Eck-Platte: Arm an der Westwand + Arm an der Nordwand
 box(WX, -1.40, NZ, 1.70, TOP0, TOP1)
-box(-1.40, -1.00, NZ, 0.95, TOP0, TOP1)
+box(-1.40, -1.16, NZ, 0.95, TOP0, TOP1)
+# Verlängerung zur Tür hin (gehört zum Schreibtisch): beige gesprenkelte Platte auf Alubeinen,
+# endet kurz vor dem Türrahmen (Tür t8 beginnt bei x -0.83)
+box(-1.16, -0.90, NZ, 0.95, TOP0, TOP1 + 0.002, "chip")
+for lx, lz in [(-1.14, 0.92), (-0.93, 0.92), (-0.93, 0.28)]:
+    box(lx - 0.018, lx + 0.018, lz - 0.018, lz + 0.018, 0, TOP0, "chrome")
 # Beine (dünne weiße Rohre) an den freien Ecken
-for lx, lz in [(-1.43, 1.67), (-1.03, 0.92), (-1.43, 0.92)]:
+for lx, lz in [(-1.43, 1.67), (-1.43, 0.92)]:
     box(lx - 0.02, lx + 0.02, lz - 0.02, lz + 0.02, 0, TOP0, "white")
 
 # drei Monitore (schwarz) mit Fuß
