@@ -746,6 +746,7 @@ function loadModel() {
       scene.add(edges);
       modelData.edgesMesh = edges;
       applyCabinets();
+      applyTvs();
 
       // Außenfläche rund um die Wohnung (nimmt auch den Schatten auf)
       const slab = new THREE.Mesh(
@@ -986,6 +987,10 @@ function updateLabelPositions() {
   const w = container.clientWidth;
   const h = container.clientHeight;
   labelEls.forEach((el, i) => placeOverlay(el, rooms[i].x, LABEL_HEIGHT_M, rooms[i].z, w, h));
+  tvBadgeEls.forEach((el, i) => {
+    const t = tvs[i];
+    if (t) placeOverlay(el, (t.x_front + t.x_back) / 2, t.top + t.tv_gap + t.tv_height + 0.2, t.tv_z, w, h);
+  });
   const cutY = clipPlane ? clipPlane.constant : 10;
   badgeEls.forEach((el, i) => {
     const o = openings[i];
@@ -1848,24 +1853,43 @@ function buildCabinetBody(c) {
 function applyCabinets() {
   if (!scene || !modelData) return;
   const signature = JSON.stringify(cabinets);
-  if (signature === cabinetSignature) return;
-  cabinetSignature = signature;
-
-  if (!cabinetGroup) {
-    cabinetGroup = new THREE.Group();
-    scene.add(cabinetGroup);
+  if (signature !== cabinetSignature) {
+    cabinetSignature = signature;
+    if (!cabinetGroup) {
+      cabinetGroup = new THREE.Group();
+      scene.add(cabinetGroup);
+    }
+    for (const child of [...cabinetGroup.children]) {
+      child.traverse((n) => n.geometry && n.geometry.dispose());
+    }
+    cabinetGroup.clear();
+    for (const c of cabinets) cabinetGroup.add(buildCabinetBody(c));
   }
-  for (const child of [...cabinetGroup.children]) {
-    child.traverse((n) => n.geometry && n.geometry.dispose());
-  }
-  cabinetGroup.clear();
-  for (const c of cabinets) cabinetGroup.add(buildCabinetBody(c));
+  applyModelCutouts();
+}
 
-  // alten Schrank-Block aus dem Modell nehmen: nur Dreiecke der Möbelgruppen innerhalb des Schranks
+// Alte Möbel-Blöcke aus dem Modell nehmen, die durch eigene Modelle (Schrank, Fernseher) ersetzt werden:
+// nur Dreiecke der Möbelgruppen, deren Mittelpunkt im Bereich des neuen Möbelstücks liegt.
+let cutoutSignature = "";
+
+function applyModelCutouts() {
+  if (!scene || !modelData || !modelData.restMesh) return;
+  const rects = [
+    ...cabinets.map(cabinetRect),
+    ...tvs.map((t) => ({
+      minX: Math.min(t.x_front, t.x_back) - 0.06,
+      maxX: Math.max(t.x_front, t.x_back) + 0.06,
+      minZ: t.z_min - 0.04,
+      maxZ: t.z_max + 0.04,
+    })),
+  ];
+  const signature = JSON.stringify(rects);
+  if (signature === cutoutSignature) return;
+  cutoutSignature = signature;
+
   const pos = modelData.source.getAttribute("position");
   const hide = new Set();
-  for (const c of cabinets) {
-    const r = cabinetRect(c);
+  for (const r of rects) {
     for (const g of modelData.furniture) {
       if (g.box.max.x < r.minX || g.box.min.x > r.maxX || g.box.max.z < r.minZ || g.box.min.z > r.maxZ) continue;
       for (const t of g.tris) {
@@ -1882,6 +1906,178 @@ function applyCabinets() {
   modelData.edgesMesh.geometry.dispose();
   modelData.edgesMesh.geometry = new THREE.EdgesGeometry(geometry, 35);
   requestRender();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fernseher mit Unterschrank. Ob der Fernseher läuft, meldet der Server (/api/floorplan/tvs):
+// er schaut auf die Leistung der zugeordneten Shelly-Steckdose (ab `on_watts` = an). Aus = schwarzer
+// Bildschirm, an = leuchtendes Bild und ein Lichtschein auf dem Boden davor.
+// ---------------------------------------------------------------------------------------------
+let tvs = [];
+let tvGroup = null;
+let tvLayoutSignature = "";
+let tvObjs = new Map(); // id -> { screen, glow, state }
+let tvMaterials = null;
+let tvBadgeEls = [];
+
+function getTvScreenTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 144;
+  const ctx = canvas.getContext("2d");
+  const sky = ctx.createLinearGradient(0, 0, 256, 144);
+  sky.addColorStop(0, "#3b2a55");
+  sky.addColorStop(0.5, "#8a5a7a");
+  sky.addColorStop(1, "#2f4a35");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, 256, 144);
+  for (let i = 0; i < 22; i++) {
+    ctx.fillStyle = `rgba(${150 + hash01(i, 1) * 90},${190 + hash01(i, 2) * 60},${110 + hash01(i, 3) * 60},0.55)`;
+    ctx.beginPath();
+    ctx.ellipse(hash01(i, 4) * 256, hash01(i, 5) * 144, 10 + hash01(i, 6) * 26, 6 + hash01(i, 7) * 16, hash01(i, 8) * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function getTvMaterials() {
+  if (tvMaterials) return tvMaterials;
+  const clip = { clippingPlanes: [clipPlane], clipShadows: true };
+  tvMaterials = {
+    body: new THREE.MeshStandardMaterial({ color: 0xf5f5f3, roughness: 0.28, metalness: 0, ...clip }),
+    top: new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.12, metalness: 0.05, ...clip }),
+    gap: new THREE.MeshStandardMaterial({ color: 0xa9aaa8, roughness: 0.8, metalness: 0, ...clip }),
+    plinth: new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.7, metalness: 0, ...clip }),
+    black: new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.35, metalness: 0.2, ...clip }),
+    off: new THREE.MeshStandardMaterial({ color: 0x07090c, roughness: 0.1, metalness: 0.5, ...clip }),
+    on: new THREE.MeshBasicMaterial({ map: getTvScreenTexture(), toneMapped: false, clippingPlanes: [clipPlane] }),
+  };
+  return tvMaterials;
+}
+
+function buildTv(t) {
+  const m = getTvMaterials();
+  const group = new THREE.Group();
+  const front = Math.min(t.x_front, t.x_back);
+  const back = Math.max(t.x_front, t.x_back);
+  const depth = back - front;
+  const len = t.z_max - t.z_min;
+  const midX = (front + back) / 2;
+  const midZ = (t.z_min + t.z_max) / 2;
+  const add = (w, h, d, material, x, y, z, shadow = true) => {
+    const mesh = box(w, h, d, material, shadow);
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+    return mesh;
+  };
+
+  // Unterschrank: Sockel, weißer Korpus, glänzende Platte
+  add(depth - 0.07, t.base - FLOOR_TOP_M, len - 0.12, m.plinth, midX + 0.01, (FLOOR_TOP_M + t.base) / 2, midZ);
+  const bodyH = t.top - 0.02 - t.base;
+  add(depth, bodyH, len, m.body, midX, t.base + bodyH / 2, midZ);
+  add(depth + 0.01, 0.02, len + 0.01, m.top, midX, t.top - 0.01, midZ);
+
+  // Fronten: links zwei Türen, rechts zwei Schubladen (Fugen als dünne helle Linien)
+  const split = t.door_split ?? t.z_min + len * 0.46;
+  const fx = front - 0.002;
+  const gapLine = (z0, z1, y0, y1) => add(0.004, y1 - y0, z1 - z0, m.gap, fx, (y0 + y1) / 2, (z0 + z1) / 2, false);
+  gapLine(split - 0.002, split + 0.002, t.base + 0.01, t.top - 0.025); // Tür | Schubladen
+  gapLine((t.z_min + split) / 2 - 0.002, (t.z_min + split) / 2 + 0.002, t.base + 0.01, t.top - 0.025); // Tür | Tür
+  const midY = (t.base + t.top - 0.02) / 2;
+  gapLine(split, t.z_max - 0.01, midY - 0.002, midY + 0.002); // Schublade oben | unten
+
+  // Soundbar
+  if (t.soundbar) add(0.08, 0.055, 0.82, m.black, front + 0.2, t.top + 0.0275, t.tv_z);
+
+  // Fernseher: Rahmen, Standfuß, Bildschirm
+  const tvX = back - 0.2;
+  const tvBottom = t.top + t.tv_gap;
+  add(0.04, t.tv_height, t.tv_width, m.black, tvX, tvBottom + t.tv_height / 2, t.tv_z);
+  add(0.16, 0.02, 0.4, m.black, tvX, t.top + 0.01, t.tv_z);
+  add(0.04, tvBottom - t.top - 0.02, 0.06, m.black, tvX, (t.top + tvBottom) / 2, t.tv_z, false);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(t.tv_width - 0.04, t.tv_height - 0.04), m.off);
+  screen.rotation.y = -Math.PI / 2; // Plane schaut standardmäßig nach +z, der Bildschirm soll nach -x schauen
+  screen.position.set(tvX - 0.0205, tvBottom + t.tv_height / 2, t.tv_z);
+  group.add(screen);
+
+  // Lichtschein auf dem Boden vor dem Fernseher
+  const glow = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.2, 3.2),
+    new THREE.MeshBasicMaterial({
+      map: getGlowTexture(),
+      color: 0x9fd0ff,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+      toneMapped: false,
+    })
+  );
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.set(front - 1.1, 0.135, t.tv_z);
+  glow.renderOrder = 6;
+  glow.visible = false;
+  group.add(glow);
+
+  return { group, screen, glow, state: null };
+}
+
+function applyTvState(obj, on) {
+  obj.state = on;
+  const m = getTvMaterials();
+  obj.screen.material = on ? m.on : m.off;
+  obj.glow.visible = Boolean(on);
+}
+
+function renderTvBadges() {
+  badgeLayer.querySelectorAll(".fp-tv-badge").forEach((n) => n.remove());
+  tvBadgeEls = tvs.map((t) => {
+    const el = document.createElement("div");
+    el.className = `fp-tv-badge ${t.on ? "on" : "off"}`;
+    el.textContent = t.on ? "📺" : "";
+    el.title = `${t.name}: ${t.on === null || t.on === undefined ? "unbekannt" : t.on ? "an" : "aus"}` + (t.power_w != null ? ` (${Math.round(t.power_w)} W)` : "");
+    badgeLayer.appendChild(el);
+    return el;
+  });
+  updateLabelPositions();
+}
+
+function applyTvs() {
+  if (!scene || !modelData) return;
+  const layout = JSON.stringify(tvs.map(({ on, power_w, ...rest }) => rest));
+  if (layout !== tvLayoutSignature) {
+    tvLayoutSignature = layout;
+    if (!tvGroup) {
+      tvGroup = new THREE.Group();
+      scene.add(tvGroup);
+    }
+    for (const child of [...tvGroup.children]) child.traverse((n) => n.geometry && n.geometry.dispose());
+    tvGroup.clear();
+    tvObjs = new Map();
+    for (const t of tvs) {
+      const obj = buildTv(t);
+      tvGroup.add(obj.group);
+      tvObjs.set(t.id, obj);
+    }
+  }
+  for (const t of tvs) {
+    const obj = tvObjs.get(t.id);
+    if (obj && obj.state !== Boolean(t.on)) applyTvState(obj, Boolean(t.on));
+  }
+  renderTvBadges();
+  applyModelCutouts();
+  requestRender();
+}
+
+async function loadTvs() {
+  try {
+    const res = await fetch("/api/floorplan/tvs", { cache: "no-store" });
+    if (res.ok) tvs = (await res.json()).tvs || [];
+  } catch {
+    /* offline: letzten Zustand behalten */
+  }
+  applyTvs();
 }
 
 async function loadCabinets() {
@@ -1903,8 +2099,14 @@ function startViewer() {
   if (!renderer) return;
   loadRooms(); // bei jedem Öffnen neu holen, damit Änderungen von anderen Geräten sichtbar sind
   loadCabinets();
+  loadTvs();
   loadOpenings();
-  if (openingTimer === null) openingTimer = setInterval(loadOpenings, OPENING_POLL_MS);
+  if (openingTimer === null) {
+    openingTimer = setInterval(() => {
+      loadOpenings();
+      loadTvs();
+    }, OPENING_POLL_MS);
+  }
   resize();
   requestRender();
   if (animationId === null) animate();

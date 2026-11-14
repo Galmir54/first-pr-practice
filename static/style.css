@@ -1488,3 +1488,33 @@ button.danger-link {
 .fp-popup-apply:disabled {
   opacity: 0.6;
 }
+
+/* Fernseher-Symbol über dem Gerät: an = blauer Ring mit Symbol, aus = kleiner grauer Punkt */
+.fp-tv-badge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.fp-tv-badge.off {
+  width: 9px;
+  height: 9px;
+  background: #7d8a97;
+  box-shadow: 0 0 0 2px rgba(8, 18, 27, 0.7);
+  opacity: 0.8;
+}
+
+.fp-tv-badge.on {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 0.95rem;
+  line-height: 1;
+  background: rgba(20, 38, 56, 0.85);
+  border: 3px solid #4aa3ff;
+  box-shadow: 0 0 14px rgba(74, 163, 255, 0.9), 0 3px 8px rgba(0, 0, 0, 0.45);
+}

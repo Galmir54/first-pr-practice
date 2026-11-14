@@ -6,6 +6,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from .. import poller
 from ..db import db_cursor
 
 router = APIRouter()
@@ -15,6 +16,7 @@ THERMOSTAT_ROOMS_KEY = "floorplan.thermostat_rooms"
 OPENINGS_KEY = "floorplan.openings"
 OPENING_STATE_KEY = "floorplan.opening_state"
 CABINETS_KEY = "floorplan.cabinets"
+TVS_KEY = "floorplan.tvs"
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
@@ -81,6 +83,32 @@ Cabinet.model_rebuild()
 
 class CabinetsIn(BaseModel):
     cabinets: list[Cabinet] = Field(max_length=10)
+
+
+class Tv(BaseModel):
+    """Fernseher auf einem Unterschrank. Ob er an ist, wird aus der Leistung einer Shelly-Steckdose
+    abgeleitet (`device_id`): ab `on_watts` gilt er als an."""
+
+    id: str = Field(pattern=ID_PATTERN.pattern)
+    name: str = Field(default="Fernseher", max_length=40)
+    x_front: float  # Vorderkante des Unterschranks (zum Raum hin, in -x)
+    x_back: float  # Rückseite an der Wand
+    z_min: float
+    z_max: float
+    base: float = Field(default=0.18, ge=0, lt=1)  # Unterkante des Korpus (Sockel darunter)
+    top: float = Field(default=0.71, gt=0.2, lt=1.5)  # Oberkante des Unterschranks
+    door_split: float | None = None  # z-Lage, ab der rechts Schubladen statt Türen sitzen
+    tv_z: float
+    tv_width: float = Field(default=1.0, gt=0.3, lt=3)
+    tv_height: float = Field(default=0.57, gt=0.2, lt=2)
+    tv_gap: float = Field(default=0.08, ge=0, lt=0.5)  # Abstand TV-Unterkante zum Schrank
+    soundbar: bool = True
+    device_id: int | None = None
+    on_watts: float = Field(default=40, gt=0, lt=5000)
+
+
+class TvsIn(BaseModel):
+    tvs: list[Tv] = Field(max_length=6)
 
 
 class OpeningsIn(BaseModel):
@@ -194,6 +222,31 @@ async def put_cabinets(body: CabinetsIn):
     items = [c.model_dump() for c in body.cabinets]
     await asyncio.to_thread(_save, CABINETS_KEY, items)
     return {"cabinets": items}
+
+
+def _tv_state(tv: dict) -> dict:
+    """Ergänzt `on` (True/False, None = unbekannt) und `power_w` aus dem letzten Messwert."""
+    out = dict(tv)
+    out["on"] = None
+    out["power_w"] = None
+    device_id = tv.get("device_id")
+    reading = poller.latest.get(device_id) if device_id is not None else None
+    if reading and reading.get("power_w") is not None:
+        out["power_w"] = round(float(reading["power_w"]), 1)
+        out["on"] = out["power_w"] >= float(tv.get("on_watts", 40))
+    return out
+
+
+@router.get("/tvs")
+def get_tvs():
+    return {"tvs": [_tv_state(t) for t in _load(TVS_KEY, [])]}
+
+
+@router.put("/tvs")
+async def put_tvs(body: TvsIn):
+    items = [t.model_dump() for t in body.tvs]
+    await asyncio.to_thread(_save, TVS_KEY, items)
+    return {"tvs": [_tv_state(t) for t in items]}
 
 
 @router.put("/openings/{opening_id}/state")
