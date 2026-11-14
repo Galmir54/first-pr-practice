@@ -18,7 +18,8 @@ const MODEL_SCALE = 100;
 // knapp unter der Oberkante sind es Wandoberseiten, dazwischen z.B. Fensterbänke.
 const FLOOR_MAX_Y = 0.3;
 const WALL_TOP_BAND = 0.06;
-const DEFAULT_CUT_M = 1.25;
+// Standardmäßig ganze Wände (kein Schnitt); der Regler "Wandschnitt" kürzt sie bei Bedarf.
+const DEFAULT_CUT_M = Infinity;
 
 const COLORS = {
   floor: 0xc79d6d, // helles Eichenholz
@@ -241,8 +242,7 @@ function loadModel() {
       // Schnitt-Regler: ganz rechts = kein Schnitt
       cutSlider.min = "0.3";
       cutSlider.max = String(bounds.height.toFixed(2));
-      cutSlider.value = String(DEFAULT_CUT_M);
-      applyCut(DEFAULT_CUT_M);
+      resetCut();
 
       setView("iso");
       toolbar.classList.remove("hidden");
@@ -258,6 +258,12 @@ function loadModel() {
       );
     }
   );
+}
+
+function resetCut() {
+  const height = Math.min(DEFAULT_CUT_M, bounds.height);
+  cutSlider.value = String(height);
+  applyCut(height);
 }
 
 function applyCut(heightM) {
@@ -925,8 +931,7 @@ function stopViewer() {
 viewButtons.forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
 document.getElementById("fpReset").addEventListener("click", () => {
   if (!bounds) return;
-  cutSlider.value = String(DEFAULT_CUT_M);
-  applyCut(DEFAULT_CUT_M);
+  resetCut();
   setView("iso");
 });
 cutSlider.addEventListener("input", () => applyCut(parseFloat(cutSlider.value)));
