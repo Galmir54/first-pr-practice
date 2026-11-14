@@ -319,13 +319,6 @@ function buildModelGeometries(source, height) {
   for (let t = 0; t < triCount; t++) (kind[t] === 1 ? floorTris : restTris).push(t);
 
   const floorGeometry = subsetGeometry(source, floorTris);
-  const fp = floorGeometry.getAttribute("position");
-  const uv = new Float32Array(fp.count * 2);
-  for (let i = 0; i < fp.count; i++) {
-    uv[i * 2] = fp.getX(i) / FLOOR_TILE_M;
-    uv[i * 2 + 1] = fp.getZ(i) / FLOOR_TILE_M;
-  }
-  floorGeometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
 
   const restGeometry = subsetGeometry(source, restTris);
   const colors = new Float32Array(restTris.length * 9);
@@ -353,7 +346,197 @@ function buildModelGeometries(source, height) {
     if ((soft || table) && dx < 2.6 && dz < 2.6 && footprint < 4.5) rugs.push({ box: bx.clone(), seed: hash01(bx.min.x * 3.1, bx.min.z * 2.7) });
   }
 
-  return { floorGeometry, restGeometry, rugs };
+  return { floorGeometry, restGeometry, rugs, grid: { wallZone, minX, minZ, gw, gh } };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Bodenbeläge je Raum: Küche und Bad bekommen Fliesen (Hexagon-Mosaik), alles andere Holzdielen.
+// Das Modell kennt keine Räume. Deshalb wird von jedem benannten Raumschild aus (kürzester Weg
+// um die Wände herum) der Boden dem nächsten Raum zugeordnet, Fliesenräume nur im Umkreis.
+// ---------------------------------------------------------------------------------------------
+const TILE_ROOM_PATTERN = /bad|wc|toilette|dusche|k[üu]che/i;
+const TILE_MAX_RADIUS_M = 3.4;
+const TILE_SIZE_M = 0.6;
+const TILE_CANVAS_W = 512;
+const TILE_CANVAS_H = 444; // 6 * Hexagon-Radius bei 4 Hexagonen Breite
+
+let modelData = null; // { floorGeometry, grid }
+let floorGroup = null;
+let floorSignature = null;
+let floorMaterials = null;
+
+function makeTileTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE_CANVAS_W;
+  canvas.height = TILE_CANVAS_H;
+  const ctx = canvas.getContext("2d");
+  const R = TILE_CANVAS_W / (4 * Math.sqrt(3));
+  const dx = Math.sqrt(3) * R;
+  ctx.fillStyle = "#8a9299"; // Fuge
+  ctx.fillRect(0, 0, TILE_CANVAS_W, TILE_CANVAS_H);
+  for (let row = -1; row <= 5; row++) {
+    for (let col = -1; col <= 5; col++) {
+      const cx = col * dx + (row % 2 === 0 ? 0 : dx / 2);
+      const cy = row * 1.5 * R;
+      const tone = 0.93 + hash01(col + 7, row + 3) * 0.12;
+      const v = Math.round(206 * tone);
+      ctx.fillStyle = `rgb(${v},${v + 3},${v + 6})`;
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const ang = Math.PI / 6 + (k * Math.PI) / 3;
+        const px = cx + (R - 3) * Math.cos(ang);
+        const py = cy + (R - 3) * Math.sin(ang);
+        if (k === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function getFloorMaterials() {
+  if (floorMaterials) return floorMaterials;
+  const common = { metalness: 0, side: THREE.DoubleSide, clippingPlanes: [clipPlane] };
+  floorMaterials = {
+    wood: new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.62, ...common }),
+    tile: new THREE.MeshStandardMaterial({ map: makeTileTexture(), roughness: 0.35, ...common }),
+  };
+  return floorMaterials;
+}
+
+const NEIGHBOURS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+// Ordnet jede Rasterzelle dem nächsten benannten Raum zu (-1 = keinem)
+function labelRoomCells(grid, roomList) {
+  const { wallZone, minX, minZ, gw, gh } = grid;
+  const label = new Int16Array(gw * gh).fill(-1);
+  const dist = new Float32Array(gw * gh).fill(Infinity);
+  const queue = [];
+  const limit = roomList.map((r) => (TILE_ROOM_PATTERN.test(r.name) ? TILE_MAX_RADIUS_M / GRID_CELL : Infinity));
+
+  roomList.forEach((room, i) => {
+    if (!norm(room.name)) return;
+    let cx = Math.floor((room.x - minX) / GRID_CELL);
+    let cz = Math.floor((room.z - minZ) / GRID_CELL);
+    if (cx < 0 || cz < 0 || cx >= gw || cz >= gh) return;
+    // liegt das Schild auf einer Wand, die nächste freie Zelle suchen
+    if (wallZone[cz * gw + cx]) {
+      let best = null;
+      for (let r = 1; r < 14 && !best; r++) {
+        for (let dz = -r; dz <= r; dz++) {
+          for (let dx = -r; dx <= r; dx++) {
+            const x = cx + dx;
+            const z = cz + dz;
+            if (x >= 0 && z >= 0 && x < gw && z < gh && !wallZone[z * gw + x] && !best) best = [x, z];
+          }
+        }
+      }
+      if (!best) return;
+      [cx, cz] = best;
+    }
+    const idx = cz * gw + cx;
+    if (label[idx] === -1) {
+      label[idx] = i;
+      dist[idx] = 0;
+      queue.push(idx);
+    }
+  });
+
+  // gleichzeitige Breitensuche von allen Schildern aus, Wände sperren den Weg
+  for (let head = 0; head < queue.length; head++) {
+    const idx = queue[head];
+    const x = idx % gw;
+    const z = (idx - x) / gw;
+    const owner = label[idx];
+    for (const [dx, dz] of NEIGHBOURS) {
+      const nx = x + dx;
+      const nz = z + dz;
+      if (nx < 0 || nz < 0 || nx >= gw || nz >= gh) continue;
+      const nIdx = nz * gw + nx;
+      if (label[nIdx] !== -1 || wallZone[nIdx]) continue;
+      if (dist[idx] + 1 > limit[owner]) continue;
+      label[nIdx] = owner;
+      dist[nIdx] = dist[idx] + 1;
+      queue.push(nIdx);
+    }
+  }
+  // Zellen unter den Wänden übernehmen den Raum der nächsten beschrifteten Zelle
+  const wallQueue = [];
+  for (let i = 0; i < label.length; i++) if (label[i] !== -1) wallQueue.push(i);
+  for (let head = 0; head < wallQueue.length; head++) {
+    const idx = wallQueue[head];
+    const x = idx % gw;
+    const z = (idx - x) / gw;
+    for (const [dx, dz] of NEIGHBOURS) {
+      const nx = x + dx;
+      const nz = z + dz;
+      if (nx < 0 || nz < 0 || nx >= gw || nz >= gh) continue;
+      const nIdx = nz * gw + nx;
+      if (label[nIdx] !== -1 || !wallZone[nIdx]) continue;
+      label[nIdx] = label[idx];
+      wallQueue.push(nIdx);
+    }
+  }
+  return label;
+}
+
+function applyFloorTypes() {
+  if (!modelData || !scene) return;
+  const signature = JSON.stringify(rooms.map((r) => [r.x, r.z, norm(r.name)]));
+  if (signature === floorSignature) return;
+  floorSignature = signature;
+
+  const { floorGeometry, grid } = modelData;
+  const label = labelRoomCells(grid, rooms);
+  const pos = floorGeometry.getAttribute("position");
+  const triCount = pos.count / 3;
+  const woodTris = [];
+  const tileTris = [];
+  for (let t = 0; t < triCount; t++) {
+    const cx = (pos.getX(t * 3) + pos.getX(t * 3 + 1) + pos.getX(t * 3 + 2)) / 3;
+    const cz = (pos.getZ(t * 3) + pos.getZ(t * 3 + 1) + pos.getZ(t * 3 + 2)) / 3;
+    const gx = Math.max(0, Math.min(grid.gw - 1, Math.floor((cx - grid.minX) / GRID_CELL)));
+    const gz = Math.max(0, Math.min(grid.gh - 1, Math.floor((cz - grid.minZ) / GRID_CELL)));
+    const owner = label[gz * grid.gw + gx];
+    (owner >= 0 && TILE_ROOM_PATTERN.test(rooms[owner].name) ? tileTris : woodTris).push(t);
+  }
+
+  if (!floorGroup) {
+    floorGroup = new THREE.Group();
+    scene.add(floorGroup);
+  }
+  for (const child of floorGroup.children) child.geometry.dispose();
+  floorGroup.clear();
+  const mats = getFloorMaterials();
+  const addFloor = (tris, material, uvScale) => {
+    if (!tris.length) return;
+    const geo = subsetGeometry(floorGeometry, tris);
+    const p = geo.getAttribute("position");
+    const uv = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) {
+      uv[i * 2] = p.getX(i) / uvScale[0];
+      uv[i * 2 + 1] = p.getZ(i) / uvScale[1];
+    }
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 5;
+    floorGroup.add(mesh);
+  };
+  addFloor(woodTris, mats.wood, [FLOOR_TILE_M, FLOOR_TILE_M]);
+  addFloor(tileTris, mats.tile, [TILE_SIZE_M, (TILE_SIZE_M * TILE_CANVAS_H) / TILE_CANVAS_W]);
+  requestRender();
 }
 
 // Teppich-Muster (Bordüre + Mittelfeld) in wenigen Farbvarianten
@@ -516,23 +699,13 @@ function loadModel() {
         size: size.clone(),
       };
 
-      const { floorGeometry, restGeometry, rugs } = buildModelGeometries(geometry, size.y);
+      const { floorGeometry, restGeometry, rugs, grid } = buildModelGeometries(geometry, size.y);
       addRugs(rugs);
 
-      // Boden mit Holzdielen-Textur
-      const floorMesh = new THREE.Mesh(
-        floorGeometry,
-        new THREE.MeshStandardMaterial({
-          map: makeFloorTexture(),
-          roughness: 0.62,
-          metalness: 0,
-          side: THREE.DoubleSide,
-          clippingPlanes: [clipPlane],
-        })
-      );
-      floorMesh.receiveShadow = true;
-      floorMesh.renderOrder = 5;
-      scene.add(floorMesh);
+      // Boden: Holzdielen, in Küche und Bad Fliesen (siehe applyFloorTypes)
+      modelData = { floorGeometry, grid };
+      floorSignature = null;
+      applyFloorTypes();
 
       // Wände und Möbel (Vertexfarben)
       const mesh = new THREE.Mesh(
@@ -783,6 +956,7 @@ function renderLabels() {
   });
   updateLabelPositions();
   renderGlows();
+  applyFloorTypes();
 }
 
 const projected = new THREE.Vector3();
