@@ -152,8 +152,21 @@ class Part(BaseModel):
     z1: float
     y0: float = Field(ge=0, lt=4)
     y1: float = Field(gt=0, lt=4)
-    mat: str = Field(default="white", pattern="^(white|chrome|black|wood|ship|hull|sail|red|gray|rust|brass|chip)$")
+    mat: str = Field(
+        default="white",
+        pattern="^(white|chrome|black|wood|ship|hull|sail|red|gray|rust|brass|chip|oak|oaklight|tile|glass|blue|led|glowblue|glowamber|glowcyan)$",
+    )
     rot: float = Field(default=0, ge=-360, le=360)
+    # "cyl" = Zylinder in der Box (Achse `axis`, Radius = halbe kleinere Seite der Querschnittsfläche)
+    shape: str = Field(default="box", pattern="^(box|cyl)$")
+    axis: str = Field(default="x", pattern="^[xyz]$")
+    # Verhalten abhängig vom Zustand des Geräts (Prop.device_id): "spin" dreht das Teil um `axis`
+    # (Drehpunkt px/py/pz, sonst die Mitte), "glow" leuchtet statt seiner Farbe, "show" ist nur sichtbar,
+    # wenn das Gerät läuft
+    anim: str = Field(default="none", pattern="^(none|spin|glow|show)$")
+    px: float | None = None
+    py: float | None = None
+    pz: float | None = None
 
 
 class Cutout(BaseModel):
@@ -171,6 +184,9 @@ class Prop(BaseModel):
     name: str = Field(default="", max_length=60)
     parts: list[Part] = Field(max_length=400)
     cutout: Cutout | None = None
+    # Shelly-Steckdose des Geräts: ab `on_watts` läuft es (Teile mit anim "spin"/"glow"/"show" reagieren)
+    device_id: int | None = None
+    on_watts: float = Field(default=8, gt=0, lt=5000)
 
 
 class PropsIn(BaseModel):
@@ -290,9 +306,22 @@ async def put_cabinets(body: CabinetsIn):
     return {"cabinets": items}
 
 
+def _prop_state(prop: dict) -> dict:
+    """Ergänzt `on` (True/False, None = ohne Gerät/unbekannt) und `power_w` aus der Shelly-Steckdose."""
+    out = dict(prop)
+    out["on"] = None
+    out["power_w"] = None
+    device_id = prop.get("device_id")
+    reading = poller.latest.get(device_id) if device_id is not None else None
+    if reading and reading.get("power_w") is not None:
+        out["power_w"] = round(float(reading["power_w"]), 1)
+        out["on"] = out["power_w"] >= float(prop.get("on_watts", 8))
+    return out
+
+
 @router.get("/props")
 async def get_props():
-    return {"props": await asyncio.to_thread(_load, PROPS_KEY, [])}
+    return {"props": [_prop_state(p) for p in await asyncio.to_thread(_load, PROPS_KEY, [])]}
 
 
 @router.put("/props")
@@ -302,7 +331,7 @@ async def put_props(body: PropsIn):
         raise HTTPException(400, "IDs müssen eindeutig sein")
     items = [p.model_dump() for p in body.props]
     await asyncio.to_thread(_save, PROPS_KEY, items)
-    return {"props": items}
+    return {"props": [_prop_state(p) for p in items]}
 
 
 _tv_ping_cache: dict[str, tuple[float, bool]] = {}

@@ -163,7 +163,10 @@ def req(method, url, body=None):
     with urllib.request.urlopen(r, timeout=20) as resp:
         return json.loads(resp.read())
 
-req("PUT", base + "/api/floorplan/props", {"props": [prop]})
+# nur das eigene Prop ersetzen, andere (z.B. die Küche) bleiben erhalten
+existing = req("GET", base + "/api/floorplan/props")["props"]
+keep = [{k: v for k, v in p.items() if k not in ("on", "power_w")} for p in existing if p["id"] != prop["id"]]
+req("PUT", base + "/api/floorplan/props", {"props": keep + [prop]})
 
 tvs = [t for t in req("GET", base + "/api/floorplan/tvs")["tvs"] if t["id"] != "tv2"]
 tvs = [{k: v for k, v in t.items() if k not in ("on", "power_w", "source")} for t in tvs]

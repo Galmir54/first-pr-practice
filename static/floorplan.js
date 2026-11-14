@@ -902,7 +902,7 @@ function loadModel() {
       setHint(null);
 
       // Zugriff für spätere Erweiterungen (Marker für Lampen/Steckdosen/Temperatur) und zum Testen.
-      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture, get decor() { return decorGroup; } };
+      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture, get decor() { return decorGroup; }, get propObjs() { return propObjs; }, applyPropState };
     },
     undefined,
     () => {
@@ -1058,7 +1058,9 @@ function resize() {
 function animate() {
   animationId = requestAnimationFrame(animate);
   const moved = controls.update();
-  if (tickOpenings(performance.now())) needsRender = true; // Tür/Fenster in Bewegung
+  const now = performance.now();
+  if (tickOpenings(now)) needsRender = true; // Tür/Fenster in Bewegung
+  if (tickProps(now)) needsRender = true; // Trommeln laufender Geräte
   if (moved || needsRender) {
     renderer.render(scene, camera);
     needsRender = false;
@@ -2384,6 +2386,8 @@ let propMaterials = null;
 function getPropMaterials() {
   if (propMaterials) return propMaterials;
   const clip = { clippingPlanes: [clipPlane], clipShadows: true };
+  const glowMat = (color) =>
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false, ...clip });
   const std = (color, roughness, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness, ...clip });
   propMaterials = {
     white: std(0xf0efeb, 0.45),
@@ -2398,26 +2402,117 @@ function getPropMaterials() {
     rust: std(0x6b2b27, 0.6),
     brass: std(0xb08d3c, 0.35, 0.6),
     chip: std(0xd3c7ab, 0.8),
+    oak: std(0x9a8265, 0.65), // Arbeitsplatte Küche
+    oaklight: std(0xcbb48b, 0.7), // Rückwand/Seitenteile
+    tile: std(0xd9a77a, 0.6),
+    blue: std(0x35549c, 0.7), // Wäsche in der Trommel
+    glass: new THREE.MeshStandardMaterial({
+      color: 0x1d2630,
+      roughness: 0.15,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.45,
+      ...clip,
+    }),
+    // leuchtende Anzeige (anim "glow") und Lichtschein auf dem Boden (anim "show")
+    led: new THREE.MeshBasicMaterial({ color: 0x8be3ff, toneMapped: false, ...clip }),
+    glowblue: glowMat(0x4cb8ff),
+    glowamber: glowMat(0xffb347),
+    glowcyan: glowMat(0x5af0e0),
   };
   return propMaterials;
 }
 
+// Baut ein Einrichtungsstück aus Quadern/Zylindern. Teile mit `anim` reagieren auf den Zustand des
+// Geräts: "spin" dreht sich (Trommel), "glow" leuchtet (Anzeige), "show" erscheint nur, wenn das Gerät läuft
+// (Lichtschein auf dem Boden).
 function buildProp(p) {
   const mats = getPropMaterials();
   const group = new THREE.Group();
+  const anims = [];
   for (const s of p.parts) {
-    const mesh = box(s.x1 - s.x0, s.y1 - s.y0, s.z1 - s.z0, mats[s.mat] || mats.white);
-    mesh.position.set((s.x0 + s.x1) / 2, FLOOR_TOP_M + (s.y0 + s.y1) / 2, (s.z0 + s.z1) / 2);
+    const w = s.x1 - s.x0;
+    const h = s.y1 - s.y0;
+    const d = s.z1 - s.z0;
+    const material = mats[s.mat] || mats.white;
+    let mesh;
+    if (s.shape === "cyl") {
+      const axis = s.axis || "x";
+      const length = axis === "x" ? w : axis === "y" ? h : d;
+      const across = axis === "x" ? Math.min(h, d) : axis === "y" ? Math.min(w, d) : Math.min(w, h);
+      const geometry = new THREE.CylinderGeometry(across / 2, across / 2, length, 32);
+      if (axis === "x") geometry.rotateZ(Math.PI / 2);
+      else if (axis === "z") geometry.rotateX(Math.PI / 2);
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    } else {
+      mesh = box(w, h, d, material);
+    }
+    const cx = (s.x0 + s.x1) / 2;
+    const cy = FLOOR_TOP_M + (s.y0 + s.y1) / 2;
+    const cz = (s.z0 + s.z1) / 2;
     mesh.rotation.y = ((s.rot || 0) * Math.PI) / 180;
+    if (s.anim === "spin") {
+      const px = s.px ?? cx;
+      const py = s.py != null ? FLOOR_TOP_M + s.py : cy;
+      const pz = s.pz ?? cz;
+      const pivot = new THREE.Group();
+      pivot.position.set(px, py, pz);
+      mesh.position.set(cx - px, cy - py, cz - pz);
+      pivot.add(mesh);
+      group.add(pivot);
+      anims.push({ type: "spin", node: pivot, axis: s.axis || "x" });
+      continue;
+    }
+    mesh.position.set(cx, cy, cz);
     group.add(mesh);
+    if (s.anim === "glow") {
+      anims.push({ type: "glow", mesh, off: material, on: mats.led });
+    } else if (s.anim === "show") {
+      mesh.visible = false;
+      mesh.castShadow = false;
+      anims.push({ type: "show", mesh });
+    }
   }
-  return group;
+  return { group, anims, on: null };
+}
+
+let propObjs = []; // pro Prop: { group, anims, on }
+const SPIN_RAD_PER_S = 3.2;
+let lastPropTick = 0;
+
+function applyPropState(obj, on) {
+  if (obj.on === on) return;
+  obj.on = on;
+  for (const a of obj.anims) {
+    if (a.type === "glow") a.mesh.material = on ? a.on : a.off;
+    else if (a.type === "show") a.mesh.visible = on;
+  }
+  requestRender();
+}
+
+// Läuft pro Bild: dreht die Trommeln laufender Geräte. true = es dreht sich etwas (neu zeichnen).
+function tickProps(now) {
+  const dt = lastPropTick ? Math.min(0.1, (now - lastPropTick) / 1000) : 0;
+  lastPropTick = now;
+  let spinning = false;
+  for (const obj of propObjs) {
+    if (!obj.on) continue;
+    for (const a of obj.anims) {
+      if (a.type !== "spin") continue;
+      a.node.rotation[a.axis] += dt * SPIN_RAD_PER_S;
+      spinning = true;
+    }
+  }
+  return spinning;
 }
 
 function applyProps() {
   if (!scene || !modelData) return;
-  const signature = JSON.stringify(props);
-  if (signature !== propSignature) {
+  const signature = JSON.stringify(props.map(({ on, power_w, ...rest }) => rest));
+  const changed = signature !== propSignature;
+  if (changed) {
     propSignature = signature;
     if (!propGroup) {
       propGroup = new THREE.Group();
@@ -2425,10 +2520,17 @@ function applyProps() {
     }
     for (const child of [...propGroup.children]) child.traverse((n) => n.geometry && n.geometry.dispose());
     propGroup.clear();
-    for (const p of props) propGroup.add(buildProp(p));
+    propObjs = props.map((p) => {
+      const obj = buildProp(p);
+      propGroup.add(obj.group);
+      return obj;
+    });
   }
-  applyModelCutouts();
-  scheduleDecor();
+  props.forEach((p, i) => propObjs[i] && applyPropState(propObjs[i], Boolean(p.on)));
+  if (changed) {
+    applyModelCutouts();
+    scheduleDecor();
+  }
   requestRender();
 }
 
@@ -2929,7 +3031,12 @@ function startViewer() {
   loadProps();
   loadOpenings();
   if (openingTimer === null) openingTimer = setInterval(loadOpenings, OPENING_POLL_MS);
-  if (tvTimer === null) tvTimer = setInterval(loadTvs, TV_POLL_MS);
+  if (tvTimer === null) {
+    tvTimer = setInterval(() => {
+      loadTvs();
+      loadProps(); // Zustand der Küchengeräte (Waschmaschine, Trockner, Spülmaschine)
+    }, TV_POLL_MS);
+  }
   resize();
   requestRender();
   if (animationId === null) animate();
