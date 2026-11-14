@@ -885,6 +885,8 @@ let editing = false;
 let openingEditing = false;
 let tempTimer = null;
 let openingTimer = null;
+let tvTimer = null;
+const TV_POLL_MS = 15000; // Fernseher alle 15 s abfragen
 
 const norm = (s) => String(s || "").trim().toLowerCase();
 
@@ -2103,12 +2105,8 @@ function startViewer() {
   loadCabinets();
   loadTvs();
   loadOpenings();
-  if (openingTimer === null) {
-    openingTimer = setInterval(() => {
-      loadOpenings();
-      loadTvs();
-    }, OPENING_POLL_MS);
-  }
+  if (openingTimer === null) openingTimer = setInterval(loadOpenings, OPENING_POLL_MS);
+  if (tvTimer === null) tvTimer = setInterval(loadTvs, TV_POLL_MS);
   resize();
   requestRender();
   if (animationId === null) animate();
@@ -2130,6 +2128,10 @@ function stopViewer() {
   if (openingTimer !== null) {
     clearInterval(openingTimer);
     openingTimer = null;
+  }
+  if (tvTimer !== null) {
+    clearInterval(tvTimer);
+    tvTimer = null;
   }
   closeTempDialog();
 }

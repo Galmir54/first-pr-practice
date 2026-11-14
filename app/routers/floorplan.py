@@ -243,7 +243,8 @@ async def put_cabinets(body: CabinetsIn):
 
 
 _tv_ping_cache: dict[str, tuple[float, bool]] = {}
-TV_PING_CACHE_SECONDS = 4
+# Der Fernseher wird höchstens alle 15 s befragt, egal wie viele Geräte den Grundriss offen haben.
+TV_PING_CACHE_SECONDS = 15
 
 
 async def _tv_reachable(ip: str) -> bool:
