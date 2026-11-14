@@ -1,0 +1,8 @@
+# Erlaubt dem Nutzer 'pi' passwortlos genau einen Befehl auszuführen: den
+# Energie-Dashboard-Dienst neu zu starten. Wird vom Auto-Update-Skript
+# (deploy/auto-update.sh) benötigt, damit es ohne manuelle Passworteingabe
+# laufen kann. Keine weiteren Rechte werden gewährt.
+#
+# Installation: sudo cp deploy/energy-dashboard-sudoers /etc/sudoers.d/energy-dashboard-update
+#               sudo chmod 440 /etc/sudoers.d/energy-dashboard-update
+pi ALL=(root) NOPASSWD: /usr/bin/systemctl restart energy-dashboard

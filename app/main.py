@@ -1,0 +1,61 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from . import config, db, heating, maintenance, waste
+from .poller import poller_loop
+from .routers import devices, readings, summary, tariff
+from .routers import floorplan as floorplan_router
+from .routers import heating as heating_router
+from .routers import waste as waste_router
+
+logging.basicConfig(level=logging.INFO)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db.init_db()
+    tasks = [
+        asyncio.create_task(poller_loop()),
+        asyncio.create_task(maintenance.maintenance_loop()),
+        asyncio.create_task(waste.waste_loop()),
+        asyncio.create_task(heating.heating_loop()),
+    ]
+    yield
+    maintenance.request_stop()
+    for task in tasks:
+        task.cancel()
+
+
+app = FastAPI(title="Energie-Dashboard", lifespan=lifespan)
+
+app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
+app.include_router(readings.router, prefix="/api/devices", tags=["readings"])
+app.include_router(tariff.router, prefix="/api/tariff", tags=["tariff"])
+app.include_router(summary.router, prefix="/api/summary", tags=["summary"])
+app.include_router(waste_router.router, prefix="/api/waste", tags=["waste"])
+app.include_router(heating_router.router, prefix="/api/heating", tags=["heating"])
+app.include_router(floorplan_router.router, prefix="/api/floorplan", tags=["floorplan"])
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Statische Dateien mit `Cache-Control: no-cache`: der Browser fragt bei jedem Laden
+    per ETag nach (Antwort 304, praktisch kostenlos im Heimnetz). Ohne das hält er
+    app.js/style.css nach einem Update tagelang aus dem Zwischenspeicher und zeigt eine
+    Mischung aus alter Oberfläche und neuer API."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=str(config.STATIC_DIR)), name="static")
+
+
+@app.get("/")
+async def index():
+    return FileResponse(str(config.STATIC_DIR / "index.html"), headers={"Cache-Control": "no-cache"})

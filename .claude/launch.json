@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "energy-dashboard",
+      "runtimeExecutable": "venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+      "port": 8000
+    },
+    {
+      "name": "shelly-mock-plug",
+      "runtimeExecutable": "venv/Scripts/python.exe",
+      "runtimeArgs": ["scripts/shelly_mock_server.py", "--port", "8001", "--type", "plug"],
+      "port": 8001
+    },
+    {
+      "name": "shelly-mock-3em",
+      "runtimeExecutable": "venv/Scripts/python.exe",
+      "runtimeArgs": ["scripts/shelly_mock_server.py", "--port", "8002", "--type", "3em"],
+      "port": 8002
+    }
+  ]
+}
