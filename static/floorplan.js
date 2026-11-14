@@ -570,6 +570,28 @@ labelScaleSlider.addEventListener("input", () => {
   }
 });
 
+// Zahnrad: Einstellungsfenster ein-/ausblenden (Zustand pro Gerät gemerkt, Standard: ausgeblendet).
+const gearButton = document.getElementById("fpGear");
+const PANEL_KEY = "fp.panelOpen";
+
+function setPanelOpen(open, remember = true) {
+  toolbar.classList.toggle("collapsed", !open);
+  gearButton.setAttribute("aria-expanded", String(open));
+  if (!remember) return;
+  try {
+    localStorage.setItem(PANEL_KEY, open ? "1" : "0");
+  } catch {
+    /* ohne Speicher gilt es nur bis zum Neuladen */
+  }
+}
+
+try {
+  setPanelOpen(localStorage.getItem(PANEL_KEY) === "1", false);
+} catch {
+  setPanelOpen(false, false);
+}
+gearButton.addEventListener("click", () => setPanelOpen(toolbar.classList.contains("collapsed")));
+
 roomsButton.addEventListener("click", () => setEditing(!editing));
 openingsButton.addEventListener("click", () => setOpeningEditing(!openingEditing));
 

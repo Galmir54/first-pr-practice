@@ -999,24 +999,59 @@ button.danger-link {
   background: radial-gradient(ellipse at 50% 38%, #14304a 0%, #0a1824 52%, #05080d 100%);
 }
 
+/* Zahnrad oben links blendet das Einstellungsfenster (.fp-toolbar) darunter ein und aus */
+.fp-gear {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  z-index: 4;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--text-dim);
+  background: rgba(8, 18, 27, 0.78);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+.fp-gear[aria-expanded="true"] {
+  color: var(--sum);
+  border-color: var(--sum);
+  background: rgba(57, 255, 157, 0.12);
+}
+
 .fp-toolbar {
   position: absolute;
-  left: 22px;
-  bottom: 22px;
+  left: 18px;
+  top: 66px;
   z-index: 3;
+  width: 336px;
+  max-width: calc(100% - 36px);
+  max-height: calc(100% - 84px);
+  overflow-y: auto;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 8px 12px;
-  background: rgba(8, 18, 27, 0.78);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(8, 18, 27, 0.86);
   border: 1px solid var(--card-border);
   border-radius: 14px;
   backdrop-filter: blur(8px);
 }
 
+.fp-toolbar.collapsed {
+  display: none;
+}
+
 .fp-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -1051,8 +1086,13 @@ button.danger-link {
 }
 
 .fp-slider input[type="range"] {
-  width: 180px;
+  flex: 1 1 auto;
+  min-width: 0;
   accent-color: var(--sum);
+}
+
+.fp-slider-label {
+  min-width: 78px;
 }
 
 /* Raum-Schilder mit Ally-Temperaturen (HTML über der 3D-Szene) */
