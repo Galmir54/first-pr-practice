@@ -864,6 +864,7 @@ function loadModel() {
       modelData.edgesMesh = edges;
       applyCabinets();
       applyTvs();
+      applyProps();
       scheduleDecor();
 
       // Außenfläche rund um die Wohnung (nimmt auch den Schatten auf)
@@ -1196,7 +1197,9 @@ function updateLabelPositions() {
   labelEls.forEach((el, i) => placeOverlay(el, rooms[i].x, LABEL_HEIGHT_M, rooms[i].z, w, h));
   tvBadgeEls.forEach((el, i) => {
     const t = tvs[i];
-    if (t) placeOverlay(el, (t.x_front + t.x_back) / 2, t.top + t.tv_gap + t.tv_height + 0.2, t.tv_z, w, h);
+    if (!t) return;
+    if (t.mount === "wall") placeOverlay(el, t.wall_x, FLOOR_TOP_M + t.y_bottom + t.tv_height + 0.2, t.wall_z, w, h);
+    else placeOverlay(el, (t.x_front + t.x_back) / 2, t.top + t.tv_gap + t.tv_height + 0.2, t.tv_z, w, h);
   });
   const cutY = clipPlane ? clipPlane.constant : 10;
   badgeEls.forEach((el, i) => {
@@ -2095,17 +2098,19 @@ function applyCabinets() {
 // Alte Möbel-Blöcke aus dem Modell nehmen, die durch eigene Modelle (Schrank, Fernseher) ersetzt werden:
 // nur Dreiecke der Möbelgruppen, deren Mittelpunkt im Bereich des neuen Möbelstücks liegt.
 let cutoutSignature = "";
+const lowboardTvs = () => tvs.filter((t) => t.mount !== "wall");
 
 function applyModelCutouts() {
   if (!scene || !modelData || !modelData.restMesh) return;
   const rects = [
     ...cabinets.map(cabinetRect),
-    ...tvs.map((t) => ({
+    ...lowboardTvs().map((t) => ({
       minX: Math.min(t.x_front, t.x_back) - 0.06,
       maxX: Math.max(t.x_front, t.x_back) + 0.06,
       minZ: t.z_min - 0.04,
       maxZ: t.z_max + 0.04,
     })),
+    ...props.filter((p) => p.cutout).map((p) => ({ minX: p.cutout.x0, maxX: p.cutout.x1, minZ: p.cutout.z0, maxZ: p.cutout.z1 })),
   ];
   const signature = JSON.stringify(rects);
   if (signature === cutoutSignature) return;
@@ -2181,7 +2186,48 @@ function getTvMaterials() {
   return tvMaterials;
 }
 
+// Fernseher an der Wand (Halterung): lokal gebaut mit Bildschirm Richtung +z und Ursprung in der
+// Wandebene, dann so gedreht, dass er in `facing` schaut.
+function buildWallTv(t) {
+  const m = getTvMaterials();
+  const holder = new THREE.Group();
+  const yBottom = FLOOR_TOP_M + t.y_bottom;
+  const yMid = yBottom + t.tv_height / 2;
+  const add = (w, h, d, material, x, y, z, shadow = true) => {
+    const mesh = box(w, h, d, material, shadow);
+    mesh.position.set(x, y, z);
+    holder.add(mesh);
+  };
+  add(0.2, 0.2, 0.03, m.black, 0, yMid, 0.015, false); // Halterung an der Wand
+  add(t.tv_width, t.tv_height, 0.05, m.black, 0, yMid, 0.055); // Gehäuse
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(t.tv_width - 0.04, t.tv_height - 0.04), m.off);
+  screen.position.set(0, yMid, 0.0805);
+  holder.add(screen);
+
+  const glow = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.6, 2.6),
+    new THREE.MeshBasicMaterial({
+      map: getGlowTexture(),
+      color: 0x9fd0ff,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+      toneMapped: false,
+    })
+  );
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.set(0, 0.135, 1.1);
+  glow.renderOrder = 6;
+  glow.visible = false;
+  holder.add(glow);
+
+  holder.position.set(t.wall_x, 0, t.wall_z);
+  holder.rotation.y = { "+z": 0, "-z": Math.PI, "+x": Math.PI / 2, "-x": -Math.PI / 2 }[t.facing] ?? 0;
+  return { group: holder, screen, glow, state: null };
+}
+
 function buildTv(t) {
+  if (t.mount === "wall") return buildWallTv(t);
   const m = getTvMaterials();
   const group = new THREE.Group();
   const front = Math.min(t.x_front, t.x_back);
@@ -2315,6 +2361,70 @@ async function loadCabinets() {
     /* offline: vorhandene Schränke behalten */
   }
   applyCabinets();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Einrichtung aus Quadern (/api/floorplan/props), z.B. der Arbeitsplatz im Schlafzimmer.
+// Ein Eintrag hat beliebig viele Quader und optional ein Rechteck, in dem der grobe Klotz aus dem
+// STL-Modell ausgeblendet wird.
+// ---------------------------------------------------------------------------------------------
+let props = [];
+let propGroup = null;
+let propSignature = "";
+let propMaterials = null;
+
+function getPropMaterials() {
+  if (propMaterials) return propMaterials;
+  const clip = { clippingPlanes: [clipPlane], clipShadows: true };
+  const std = (color, roughness, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness, ...clip });
+  propMaterials = {
+    white: std(0xf0efeb, 0.45),
+    chrome: std(0xb9bdc2, 0.3, 0.7),
+    black: std(0x17181b, 0.4, 0.15),
+    wood: std(0xe9e4da, 0.7),
+    ship: std(0x7d8389, 0.6),
+  };
+  return propMaterials;
+}
+
+function buildProp(p) {
+  const mats = getPropMaterials();
+  const group = new THREE.Group();
+  for (const s of p.parts) {
+    const mesh = box(s.x1 - s.x0, s.y1 - s.y0, s.z1 - s.z0, mats[s.mat] || mats.white);
+    mesh.position.set((s.x0 + s.x1) / 2, FLOOR_TOP_M + (s.y0 + s.y1) / 2, (s.z0 + s.z1) / 2);
+    mesh.rotation.y = ((s.rot || 0) * Math.PI) / 180;
+    group.add(mesh);
+  }
+  return group;
+}
+
+function applyProps() {
+  if (!scene || !modelData) return;
+  const signature = JSON.stringify(props);
+  if (signature !== propSignature) {
+    propSignature = signature;
+    if (!propGroup) {
+      propGroup = new THREE.Group();
+      scene.add(propGroup);
+    }
+    for (const child of [...propGroup.children]) child.traverse((n) => n.geometry && n.geometry.dispose());
+    propGroup.clear();
+    for (const p of props) propGroup.add(buildProp(p));
+  }
+  applyModelCutouts();
+  scheduleDecor();
+  requestRender();
+}
+
+async function loadProps() {
+  try {
+    const res = await fetch("/api/floorplan/props", { cache: "no-store" });
+    if (res.ok) props = (await res.json()).props || [];
+  } catch {
+    /* offline: letzten Stand behalten */
+  }
+  applyProps();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2575,7 +2685,7 @@ function addPlants(group, grid, label, mats) {
     const r = cabinetRect(c);
     markRect(grid, occupied, r.minX, r.maxX, r.minZ, r.maxZ, 0.5); // Platz zum Türenöffnen
   }
-  for (const t of tvs) markRect(grid, occupied, Math.min(t.x_front, t.x_back), Math.max(t.x_front, t.x_back), t.z_min, t.z_max, 0.3);
+  for (const t of lowboardTvs()) markRect(grid, occupied, Math.min(t.x_front, t.x_back), Math.max(t.x_front, t.x_back), t.z_min, t.z_max, 0.3);
   const nearOpening = new Uint8Array(gw * gh);
   for (const o of openings) {
     if (o.kind === "cabinet") continue;
@@ -2671,7 +2781,7 @@ function addPictures(group, grid, label, mats) {
       const r = cabinetRect(c);
       if (x > r.minX - w && x < r.maxX + 0.5 + w && z > r.minZ - w && z < r.maxZ + w) return true;
     }
-    for (const t of tvs) {
+    for (const t of lowboardTvs()) {
       if (x > Math.min(t.x_front, t.x_back) - 0.3 - w && z > t.z_min - 0.25 - w && z < t.z_max + 0.25 + w) return true;
     }
     for (const o of openings) {
@@ -2759,7 +2869,8 @@ function buildDecor() {
     rooms.map((r) => [r.x, r.z, norm(r.name)]),
     openings.map((o) => [o.id, o.kind, o.x, o.z, o.width, o.along, o.sill, o.head, o.swing, o.thick]),
     cabinets,
-    tvs.map((t) => [t.x_front, t.x_back, t.z_min, t.z_max]),
+    lowboardTvs().map((t) => [t.x_front, t.x_back, t.z_min, t.z_max]),
+    props.map((p) => p.cutout || null),
   ]);
   if (signature === decorSignature) return;
   decorSignature = signature;
@@ -2800,6 +2911,7 @@ function startViewer() {
   loadRooms(); // bei jedem Öffnen neu holen, damit Änderungen von anderen Geräten sichtbar sind
   loadCabinets();
   loadTvs();
+  loadProps();
   loadOpenings();
   if (openingTimer === null) openingTimer = setInterval(loadOpenings, OPENING_POLL_MS);
   if (tvTimer === null) tvTimer = setInterval(loadTvs, TV_POLL_MS);

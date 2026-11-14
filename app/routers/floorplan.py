@@ -19,6 +19,7 @@ OPENINGS_KEY = "floorplan.openings"
 OPENING_STATE_KEY = "floorplan.opening_state"
 CABINETS_KEY = "floorplan.cabinets"
 TVS_KEY = "floorplan.tvs"
+PROPS_KEY = "floorplan.props"
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
@@ -105,6 +106,14 @@ class Tv(BaseModel):
     tv_height: float = Field(default=0.57, gt=0.2, lt=2)
     tv_gap: float = Field(default=0.08, ge=0, lt=0.5)  # Abstand TV-Unterkante zum Schrank
     soundbar: bool = True
+    # "lowboard" = Fernseher auf einem Unterschrank (x_front/x_back/z_min/z_max beschreiben diesen),
+    # "wall" = Wandhalterung: Rückseite mittig bei (wall_x, wall_z), Bildschirm schaut in `facing`
+    # (+z, -z, +x oder -x), Unterkante `y_bottom` über dem Boden. Dann ist der Rest (Unterschrank) egal.
+    mount: str = Field(default="lowboard", pattern="^(lowboard|wall)$")
+    facing: str = Field(default="+z", pattern=r"^[+-][xz]$")
+    wall_x: float | None = None
+    wall_z: float | None = None
+    y_bottom: float = Field(default=1.1, ge=0, lt=3)
     device_id: int | None = None
     on_watts: float = Field(default=40, gt=0, lt=5000)
     # IP des Fernsehers (Samsung): antwortet er im Netz, gilt er als an. Genauer als die Steckdose,
@@ -127,6 +136,41 @@ class Tv(BaseModel):
 
 class TvsIn(BaseModel):
     tvs: list[Tv] = Field(max_length=6)
+
+
+class Part(BaseModel):
+    """Ein Quader eines Einrichtungsgegenstands. x/z = Grundfläche in Szene-Koordinaten (Meter),
+    y0/y1 = Höhe über dem Fußboden, rot = Drehung um die Mitte in Grad (Drehrichtung der 3D-Szene)."""
+
+    x0: float
+    x1: float
+    z0: float
+    z1: float
+    y0: float = Field(ge=0, lt=4)
+    y1: float = Field(gt=0, lt=4)
+    mat: str = Field(default="white", pattern="^(white|chrome|black|wood|ship)$")
+    rot: float = Field(default=0, ge=-360, le=360)
+
+
+class Cutout(BaseModel):
+    x0: float
+    x1: float
+    z0: float
+    z1: float
+
+
+class Prop(BaseModel):
+    """Einrichtung aus Quadern (z.B. Schreibtisch mit Monitoren). `cutout` blendet den groben
+    Klotz im STL-Modell an dieser Stelle aus."""
+
+    id: str = Field(pattern=ID_PATTERN.pattern)
+    name: str = Field(default="", max_length=60)
+    parts: list[Part] = Field(max_length=400)
+    cutout: Cutout | None = None
+
+
+class PropsIn(BaseModel):
+    props: list[Prop] = Field(max_length=20)
 
 
 class OpeningsIn(BaseModel):
@@ -240,6 +284,21 @@ async def put_cabinets(body: CabinetsIn):
     items = [c.model_dump() for c in body.cabinets]
     await asyncio.to_thread(_save, CABINETS_KEY, items)
     return {"cabinets": items}
+
+
+@router.get("/props")
+async def get_props():
+    return {"props": await asyncio.to_thread(_load, PROPS_KEY, [])}
+
+
+@router.put("/props")
+async def put_props(body: PropsIn):
+    ids = [p.id for p in body.props]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(400, "IDs müssen eindeutig sein")
+    items = [p.model_dump() for p in body.props]
+    await asyncio.to_thread(_save, PROPS_KEY, items)
+    return {"props": items}
 
 
 _tv_ping_cache: dict[str, tuple[float, bool]] = {}
