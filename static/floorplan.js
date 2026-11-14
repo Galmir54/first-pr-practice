@@ -2036,7 +2036,9 @@ function renderTvBadges() {
     const el = document.createElement("div");
     el.className = `fp-tv-badge ${t.on ? "on" : "off"}`;
     el.textContent = t.on ? "📺" : "";
-    el.title = `${t.name}: ${t.on === null || t.on === undefined ? "unbekannt" : t.on ? "an" : "aus"}` + (t.power_w != null ? ` (${Math.round(t.power_w)} W)` : "");
+    const stateText = t.on === null || t.on === undefined ? "unbekannt" : t.on ? "an" : "aus";
+    const details = [t.source && `erkannt über ${t.source}`, t.power_w != null && `Steckdose ${Math.round(t.power_w)} W`].filter(Boolean);
+    el.title = `${t.name}: ${stateText}` + (details.length ? ` (${details.join(", ")})` : "");
     badgeLayer.appendChild(el);
     return el;
   });

@@ -1,10 +1,12 @@
 import asyncio
+import ipaddress
 import json
 import re
 import time
 
+import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .. import poller
 from ..db import db_cursor
@@ -105,6 +107,22 @@ class Tv(BaseModel):
     soundbar: bool = True
     device_id: int | None = None
     on_watts: float = Field(default=40, gt=0, lt=5000)
+    # IP des Fernsehers (Samsung): antwortet er im Netz, gilt er als an. Genauer als die Steckdose,
+    # weil an der Steckdose z.B. auch ein Computer hängen kann.
+    ip: str | None = None
+
+    @field_validator("ip")
+    @classmethod
+    def _private_ip(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            address = ipaddress.IPv4Address(value.strip())
+        except ValueError:
+            raise ValueError("Keine gültige IPv4-Adresse")
+        if not address.is_private:
+            raise ValueError("Nur Adressen im Heimnetz sind erlaubt")
+        return str(address)
 
 
 class TvsIn(BaseModel):
@@ -224,29 +242,54 @@ async def put_cabinets(body: CabinetsIn):
     return {"cabinets": items}
 
 
-def _tv_state(tv: dict) -> dict:
-    """Ergänzt `on` (True/False, None = unbekannt) und `power_w` aus dem letzten Messwert."""
+_tv_ping_cache: dict[str, tuple[float, bool]] = {}
+TV_PING_CACHE_SECONDS = 4
+
+
+async def _tv_reachable(ip: str) -> bool:
+    """Samsung-Fernseher beantworten /api/v2/ auf Port 8001 nur, solange sie laufen."""
+    cached = _tv_ping_cache.get(ip)
+    if cached and time.monotonic() - cached[0] < TV_PING_CACHE_SECONDS:
+        return cached[1]
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            resp = await client.get(f"http://{ip}:8001/api/v2/")
+        reachable = resp.status_code == 200
+    except Exception:
+        reachable = False
+    _tv_ping_cache[ip] = (time.monotonic(), reachable)
+    return reachable
+
+
+async def _tv_state(tv: dict) -> dict:
+    """Ergänzt `on` (True/False, None = unbekannt), `power_w` und die Quelle des Zustands."""
     out = dict(tv)
     out["on"] = None
     out["power_w"] = None
+    out["source"] = None
     device_id = tv.get("device_id")
     reading = poller.latest.get(device_id) if device_id is not None else None
     if reading and reading.get("power_w") is not None:
         out["power_w"] = round(float(reading["power_w"]), 1)
         out["on"] = out["power_w"] >= float(tv.get("on_watts", 40))
+        out["source"] = "Steckdose"
+    if tv.get("ip"):
+        out["on"] = await _tv_reachable(tv["ip"])
+        out["source"] = "Netzwerk"
     return out
 
 
 @router.get("/tvs")
-def get_tvs():
-    return {"tvs": [_tv_state(t) for t in _load(TVS_KEY, [])]}
+async def get_tvs():
+    tvs = await asyncio.to_thread(_load, TVS_KEY, [])
+    return {"tvs": [await _tv_state(t) for t in tvs]}
 
 
 @router.put("/tvs")
 async def put_tvs(body: TvsIn):
     items = [t.model_dump() for t in body.tvs]
     await asyncio.to_thread(_save, TVS_KEY, items)
-    return {"tvs": [_tv_state(t) for t in items]}
+    return {"tvs": [await _tv_state(t) for t in items]}
 
 
 @router.put("/openings/{opening_id}/state")
