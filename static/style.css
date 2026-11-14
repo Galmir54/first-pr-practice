@@ -1072,16 +1072,16 @@ button.danger-link {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
-  padding: 5px 10px 6px;
-  min-width: 64px;
+  gap: 0;
+  padding: 3px 7px 4px;
+  min-width: 46px;
   text-align: center;
   white-space: nowrap;
   background: rgba(8, 18, 27, 0.82);
   border: 1px solid var(--card-border);
-  border-radius: 12px;
+  border-radius: 9px;
   backdrop-filter: blur(6px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   --temp: var(--text);
 }
 
@@ -1093,15 +1093,15 @@ button.danger-link {
 }
 
 .fp-room-name {
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
+  font-size: 0.55rem;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
 
 .fp-room-temp {
   font-family: var(--font-mono);
-  font-size: 1.15rem;
+  font-size: 0.9rem;
   font-weight: 700;
   line-height: 1.15;
   color: var(--temp);
@@ -1109,7 +1109,7 @@ button.danger-link {
 }
 
 .fp-room-set {
-  font-size: 0.62rem;
+  font-size: 0.5rem;
   color: var(--text-dim);
 }
 
