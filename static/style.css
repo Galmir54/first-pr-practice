@@ -996,7 +996,7 @@ button.danger-link {
 .stl-viewer-container {
   border-radius: 8px;
   overflow: hidden;
-  background: radial-gradient(ellipse at 50% 38%, #14304a 0%, #0a1824 52%, #05080d 100%);
+  background: radial-gradient(ellipse at 50% 40%, #4a7799 0%, #27475f 52%, #112538 100%);
 }
 
 /* Zahnrad oben links blendet das Einstellungsfenster (.fp-toolbar) darunter ein und aus */
@@ -1117,12 +1117,57 @@ button.danger-link {
   min-width: 46px;
   text-align: center;
   white-space: nowrap;
-  background: rgba(8, 18, 27, 0.82);
-  border: 1px solid var(--card-border);
-  border-radius: 9px;
+  background: rgba(10, 22, 33, 0.86);
+  border: 1.5px solid color-mix(in srgb, var(--temp) 70%, transparent);
+  border-radius: 11px;
   backdrop-filter: blur(6px);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 12px color-mix(in srgb, var(--temp) 35%, transparent);
   --temp: var(--text);
+}
+
+/* Runde Status-Symbole über Türen und Fenstern */
+.fp-badges {
+  z-index: 1;
+}
+
+.fp-badge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.fp-badge.closed {
+  width: 9px;
+  height: 9px;
+  background: #39ff9d;
+  box-shadow: 0 0 8px #39ff9d, 0 0 0 2px rgba(8, 18, 27, 0.7);
+  opacity: 0.85;
+}
+
+.fp-badge.open {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 0.95rem;
+  line-height: 1;
+  background: rgba(255, 162, 58, 0.95);
+  border: 2px solid #fff;
+  box-shadow: 0 0 14px rgba(255, 162, 58, 0.9), 0 3px 8px rgba(0, 0, 0, 0.45);
+  animation: fp-badge-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes fp-badge-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(255, 162, 58, 0.7), 0 3px 8px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 162, 58, 1), 0 3px 8px rgba(0, 0, 0, 0.45);
+  }
 }
 
 .fp-room.editing {

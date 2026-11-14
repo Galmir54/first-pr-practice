@@ -22,11 +22,9 @@ const WALL_TOP_BAND = 0.06;
 const DEFAULT_CUT_M = Infinity;
 
 const COLORS = {
-  floor: 0xc79d6d, // helles Eichenholz
-  wall: 0xf3f5f7,
-  wallTop: 0xb4c2d0,
-  edge: 0x0b141d,
-  ground: 0x0d1c2a,
+  wall: 0xf7f5f1, // warmes Weiß
+  wallTop: 0xc9d3dc,
+  edge: 0x1a2a38,
 };
 
 const panel = document.getElementById("panel-floorplan");
@@ -71,7 +69,7 @@ function initScene() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(0x000000, 0); // Hintergrund-Verlauf kommt per CSS
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.localClippingEnabled = true;
@@ -80,8 +78,12 @@ function initScene() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(38, 1, 0.1, 600);
 
-  scene.add(new THREE.HemisphereLight(0xdfeaff, 0x3a2d22, 1.05));
-  const sun = new THREE.DirectionalLight(0xfff4e6, 2.1);
+  // helles, freundliches Licht: kräftiges Umgebungslicht, weiche Sonne von vorn-rechts, Gegenlicht ohne Schatten
+  scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x6b5a4a, 1.45));
+  const fill = new THREE.DirectionalLight(0xdbe8ff, 0.7);
+  fill.position.set(-10, 9, -6);
+  scene.add(fill);
+  const sun = new THREE.DirectionalLight(0xfff1de, 1.85);
   sun.position.set(9, 16, 7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -103,14 +105,106 @@ function initScene() {
   return true;
 }
 
-// Färbt jedes Dreieck nach Ausrichtung und Höhe ein (STL kennt keine Materialien).
-function colorizeModel(geometry, height) {
-  const floorColor = new THREE.Color(COLORS.floor);
-  const wallColor = new THREE.Color(COLORS.wall);
-  const wallTopColor = new THREE.Color(COLORS.wallTop);
+// Zerlegt das STL-Modell in Boden (bekommt eine Holzdiele-Textur) und den Rest (Wände + Möbel).
+//
+// STL kennt weder Materialien noch Objekte, deshalb wird aus der Geometrie geraten:
+//  - Boden: waagerechte, nach oben zeigende Flächen ganz unten.
+//  - Wand: alles, was im Grundriss auf den (leicht verbreiterten) Wandoberkanten liegt.
+//  - Möbel: der Rest zwischen den Wänden. Zusammenhängende Flächen ergeben je ein Möbelstück, das
+//    nach Höhe und Grundfläche eine Farbe bekommt (Schrank = helles Holz, Tisch = Nussbaum, Bett/
+//    Sofa = Stoff ...).
+const GRID_CELL = 0.05;
+const WALL_DILATE_CELLS = 2; // 10 cm: Wandflächen liegen direkt am Rand der Oberkante
+const FURNITURE_MAX_Y = 2.3; // höhere Teile ohne Wandoberkante sind trotzdem Wand
+const FLOOR_TILE_M = 1.2; // so viele Meter deckt eine Wiederholung der Dielentextur ab
 
-  const pos = geometry.getAttribute("position");
-  const colors = new Float32Array(pos.count * 3);
+const FURNITURE_FABRICS = [0x7f95aa, 0xc47a5e, 0x8fa88a, 0x6c7d92, 0xd0b48a];
+const FURNITURE_SMALL = [0x5d6b7a, 0xb98b6b, 0x8da38b, 0x6f8ea8, 0xc9b79c, 0x4a5563];
+
+function hash01(a, b) {
+  const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function furnitureColor(box) {
+  const dx = box.max.x - box.min.x;
+  const dz = box.max.z - box.min.z;
+  const footprint = dx * dz;
+  const top = box.max.y;
+  const r = hash01((box.min.x + box.max.x) * 7.3, (box.min.z + box.max.z) * 5.1);
+  const pick = (list) => list[Math.floor(r * list.length) % list.length];
+  if (top > 1.5 && footprint > 0.12) return 0xe6d8bf; // Schrank, Regal, Kühlschrank: helle Eiche
+  if (top > 0.7 && top <= 1.2 && footprint > 0.25) return r < 0.4 ? 0xd8d3cb : 0x9a7551; // Arbeitsplatte oder Tisch
+  if (top <= 0.8 && footprint > 1.0) return pick(FURNITURE_FABRICS); // Bett, Sofa
+  return pick(FURNITURE_SMALL);
+}
+
+function rasterTriangle(mask, gw, gh, minX, minZ, ax, az, bx, bz, cx, cz) {
+  const toCell = (v, min) => (v - min) / GRID_CELL;
+  const pax = toCell(ax, minX), paz = toCell(az, minZ);
+  const pbx = toCell(bx, minX), pbz = toCell(bz, minZ);
+  const pcx = toCell(cx, minX), pcz = toCell(cz, minZ);
+  const den = (pbz - pcz) * (pax - pcx) + (pcx - pbx) * (paz - pcz);
+  const x0 = Math.max(0, Math.floor(Math.min(pax, pbx, pcx)));
+  const x1 = Math.min(gw - 1, Math.ceil(Math.max(pax, pbx, pcx)));
+  const z0 = Math.max(0, Math.floor(Math.min(paz, pbz, pcz)));
+  const z1 = Math.min(gh - 1, Math.ceil(Math.max(paz, pbz, pcz)));
+  if (Math.abs(den) < 1e-9) return; // entartet: keine Fläche
+  for (let z = z0; z <= z1; z++) {
+    for (let x = x0; x <= x1; x++) {
+      const px = x + 0.5, pz = z + 0.5;
+      const l1 = ((pbz - pcz) * (px - pcx) + (pcx - pbx) * (pz - pcz)) / den;
+      const l2 = ((pcz - paz) * (px - pcx) + (pax - pcx) * (pz - pcz)) / den;
+      const l3 = 1 - l1 - l2;
+      if (l1 >= -0.25 && l2 >= -0.25 && l3 >= -0.25) mask[z * gw + x] = 1;
+    }
+  }
+}
+
+function dilateMask(mask, gw, gh, radius) {
+  const tmp = new Uint8Array(mask.length);
+  for (let z = 0; z < gh; z++) {
+    for (let x = 0; x < gw; x++) {
+      if (!mask[z * gw + x]) continue;
+      for (let dx = -radius; dx <= radius; dx++) {
+        const xx = x + dx;
+        if (xx >= 0 && xx < gw) tmp[z * gw + xx] = 1;
+      }
+    }
+  }
+  const out = new Uint8Array(mask.length);
+  for (let z = 0; z < gh; z++) {
+    for (let x = 0; x < gw; x++) {
+      if (!tmp[z * gw + x]) continue;
+      for (let dz = -radius; dz <= radius; dz++) {
+        const zz = z + dz;
+        if (zz >= 0 && zz < gh) out[zz * gw + x] = 1;
+      }
+    }
+  }
+  return out;
+}
+
+function subsetGeometry(source, triangles) {
+  const geometry = new THREE.BufferGeometry();
+  for (const name of ["position", "normal"]) {
+    const src = source.getAttribute(name).array;
+    const out = new Float32Array(triangles.length * 9);
+    triangles.forEach((t, i) => out.set(src.subarray(t * 9, t * 9 + 9), i * 9));
+    geometry.setAttribute(name, new THREE.BufferAttribute(out, 3));
+  }
+  return geometry;
+}
+
+function buildModelGeometries(source, height) {
+  const pos = source.getAttribute("position");
+  const triCount = pos.count / 3;
+  const bb = source.boundingBox;
+  const minX = bb.min.x - 0.3;
+  const minZ = bb.min.z - 0.3;
+  const gw = Math.ceil((bb.max.x - minX + 0.3) / GRID_CELL) + 1;
+  const gh = Math.ceil((bb.max.z - minZ + 0.3) / GRID_CELL) + 1;
+
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
   const c = new THREE.Vector3();
@@ -118,7 +212,13 @@ function colorizeModel(geometry, height) {
   const e2 = new THREE.Vector3();
   const n = new THREE.Vector3();
 
-  for (let i = 0; i < pos.count; i += 3) {
+  // 0 = Wand, 1 = Boden, 2 = Möbel-Kandidat
+  const kind = new Uint8Array(triCount);
+  const cellOf = new Int32Array(triCount);
+  const wallMask = new Uint8Array(gw * gh);
+
+  for (let t = 0; t < triCount; t++) {
+    const i = t * 3;
     a.fromBufferAttribute(pos, i);
     b.fromBufferAttribute(pos, i + 1);
     c.fromBufferAttribute(pos, i + 2);
@@ -129,38 +229,158 @@ function colorizeModel(geometry, height) {
     n.divideScalar(doubleArea || 1);
     const longestEdge = Math.max(e1.length(), e2.length(), c.distanceTo(b));
     const width = longestEdge > 0 ? doubleArea / longestEdge : 0;
-
-    // Hauchdünne Dreiecke haben eine unzuverlässige Normale (Rundungsrauschen) und würden sonst
-    // als Wand durchrutschen und helle Striche auf dem Boden ergeben. Sind sie waagerecht
-    // (nahezu keine Höhendifferenz), zählen sie als nach oben zeigend.
     const yMax = Math.max(a.y, b.y, c.y);
-    const yRange = yMax - Math.min(a.y, b.y, c.y);
+    const yMin = Math.min(a.y, b.y, c.y);
+    const yRange = yMax - yMin;
     const flat = yRange < 0.01;
     const facesUp = n.y > 0.7 || (flat && n.y > -0.7);
-    // Bodenstufen (10 vs. 12 cm) erzeugen lange, flache Dreiecke mit 2 cm Höhenunterschied, deren
-    // Normale beliebig kippen kann: alles, was ganz unten liegt und fast flach ist, gilt als Boden.
     const lowAndNearlyFlat = yMax < FLOOR_MAX_Y && yRange < 0.05 && n.y > -0.7;
+    // lange, hauchdünne Dreiecke (Fehler in der Aufteilung) würden auf dem Boden als Striche auffallen
+    const floorSliver = width < 0.04 && longestEdge > 0.8 && yMin < FLOOR_MAX_Y && yMax < 1.0;
 
-    // Das Modell enthält einige Dutzend lange, nur Millimeter bis Zentimeter breite Dreiecke, die
-    // von Möbelhöhe bis zum Boden reichen (Fehler in der Dreiecks-Aufteilung). Als weiße Striche
-    // würden sie auf dem Holzboden auffallen, daher bekommen sie die Bodenfarbe.
-    const floorSliver = width < 0.04 && longestEdge > 0.8 && Math.min(a.y, b.y, c.y) < FLOOR_MAX_Y && yMax < 1.0;
+    const cx = (a.x + b.x + c.x) / 3;
+    const cz = (a.z + b.z + c.z) / 3;
+    cellOf[t] = Math.max(0, Math.min(gh - 1, Math.floor((cz - minZ) / GRID_CELL))) * gw +
+      Math.max(0, Math.min(gw - 1, Math.floor((cx - minX) / GRID_CELL)));
 
-    let color = wallColor;
-    if (lowAndNearlyFlat || floorSliver) {
-      color = floorColor;
-    } else if (facesUp) {
-      const y = (a.y + b.y + c.y) / 3;
-      if (y < FLOOR_MAX_Y) color = floorColor;
-      else if (y > height - WALL_TOP_BAND) color = wallTopColor;
-    }
-    for (let v = 0; v < 3; v++) {
-      colors[(i + v) * 3] = color.r;
-      colors[(i + v) * 3 + 1] = color.g;
-      colors[(i + v) * 3 + 2] = color.b;
+    if (lowAndNearlyFlat || floorSliver || (facesUp && (yMin + yMax) / 2 < FLOOR_MAX_Y)) {
+      kind[t] = 1;
+    } else {
+      kind[t] = 2;
+      if (facesUp && yMin > height - 0.1) {
+        rasterTriangle(wallMask, gw, gh, minX, minZ, a.x, a.z, b.x, b.z, c.x, c.z);
+      }
     }
   }
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+  const wallZone = dilateMask(wallMask, gw, gh, WALL_DILATE_CELLS);
+  for (let t = 0; t < triCount; t++) {
+    if (kind[t] === 2 && wallZone[cellOf[t]]) kind[t] = 0;
+  }
+
+  // Möbelstücke = zusammenhängende Dreiecksgruppen außerhalb der Wände
+  const parent = new Map();
+  const find = (k) => {
+    let root = k;
+    while (parent.get(root) !== root) root = parent.get(root);
+    while (parent.get(k) !== root) {
+      const next = parent.get(k);
+      parent.set(k, root);
+      k = next;
+    }
+    return root;
+  };
+  const key = (i) => `${Math.round(pos.getX(i) * 500)},${Math.round(pos.getY(i) * 500)},${Math.round(pos.getZ(i) * 500)}`;
+  const triKeys = new Map();
+  for (let t = 0; t < triCount; t++) {
+    if (kind[t] !== 2) continue;
+    const k0 = key(t * 3);
+    const k1 = key(t * 3 + 1);
+    const k2 = key(t * 3 + 2);
+    triKeys.set(t, k0);
+    for (const k of [k0, k1, k2]) if (!parent.has(k)) parent.set(k, k);
+    parent.set(find(k1), find(k0));
+    parent.set(find(k2), find(k0));
+  }
+  const groups = new Map();
+  for (const [t, k0] of triKeys) {
+    const root = find(k0);
+    if (!groups.has(root)) groups.set(root, { tris: [], box: new THREE.Box3() });
+    const g = groups.get(root);
+    g.tris.push(t);
+    for (let v = 0; v < 3; v++) g.box.expandByPoint(a.fromBufferAttribute(pos, t * 3 + v));
+  }
+
+  const wallColor = new THREE.Color(COLORS.wall);
+  const wallTopColor = new THREE.Color(COLORS.wallTop);
+  const triColor = new Array(triCount);
+  for (let t = 0; t < triCount; t++) {
+    if (kind[t] === 0) triColor[t] = wallColor;
+  }
+  for (const g of groups.values()) {
+    const isFurniture = g.box.max.y < FURNITURE_MAX_Y && g.tris.length > 0;
+    const color = isFurniture ? new THREE.Color(furnitureColor(g.box)) : wallColor;
+    for (const t of g.tris) triColor[t] = color;
+  }
+
+  // Wandoberkanten etwas dunkler absetzen
+  for (let t = 0; t < triCount; t++) {
+    if (kind[t] !== 0) continue;
+    const i = t * 3;
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    c.fromBufferAttribute(pos, i + 2);
+    n.crossVectors(e1.subVectors(b, a), e2.subVectors(c, a)).normalize();
+    if (n.y > 0.7 && (a.y + b.y + c.y) / 3 > height - WALL_TOP_BAND) triColor[t] = wallTopColor;
+  }
+
+  const floorTris = [];
+  const restTris = [];
+  for (let t = 0; t < triCount; t++) (kind[t] === 1 ? floorTris : restTris).push(t);
+
+  const floorGeometry = subsetGeometry(source, floorTris);
+  const fp = floorGeometry.getAttribute("position");
+  const uv = new Float32Array(fp.count * 2);
+  for (let i = 0; i < fp.count; i++) {
+    uv[i * 2] = fp.getX(i) / FLOOR_TILE_M;
+    uv[i * 2 + 1] = fp.getZ(i) / FLOOR_TILE_M;
+  }
+  floorGeometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+
+  const restGeometry = subsetGeometry(source, restTris);
+  const colors = new Float32Array(restTris.length * 9);
+  restTris.forEach((t, i) => {
+    const col = triColor[t] || wallColor;
+    for (let v = 0; v < 3; v++) {
+      colors[i * 9 + v * 3] = col.r;
+      colors[i * 9 + v * 3 + 1] = col.g;
+      colors[i * 9 + v * 3 + 2] = col.b;
+    }
+  });
+  restGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+  return { floorGeometry, restGeometry, furnitureCount: [...groups.values()].filter((g) => g.box.max.y < FURNITURE_MAX_Y).length };
+}
+
+// Holzdielen als Textur (Eiche, versetzte Stöße, leichte Maserung) - einmal erzeugt, überall wiederholt.
+function makeFloorTexture() {
+  const size = 1024;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const rows = 8; // Dielenreihen je Kachel (1,2 m -> 15 cm breite Dielen)
+  const rowH = size / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -hash01(r, 3.3) * size * 0.5;
+    while (x < size) {
+      const len = size * (0.38 + hash01(r, x) * 0.32);
+      const tone = 0.9 + hash01(r * 13.1, x * 0.01) * 0.2;
+      const base = [214, 172, 120].map((v) => Math.round(Math.min(255, v * tone)));
+      ctx.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`;
+      ctx.fillRect(x, r * rowH, len, rowH);
+      // Maserung
+      ctx.globalAlpha = 0.1;
+      ctx.strokeStyle = "#7a5632";
+      for (let g = 0; g < 7; g++) {
+        const gy = r * rowH + 6 + hash01(g, r + x) * (rowH - 12);
+        ctx.beginPath();
+        ctx.moveTo(x + 4, gy);
+        ctx.bezierCurveTo(x + len * 0.3, gy + (hash01(g, 1 + x) - 0.5) * 8, x + len * 0.6, gy + (hash01(g, 2 + x) - 0.5) * 8, x + len - 4, gy);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      // Fugen
+      ctx.fillStyle = "rgba(70,45,25,0.55)";
+      ctx.fillRect(x, r * rowH, 2, rowH);
+      ctx.fillRect(x, r * rowH, len, 2);
+      x += len;
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
 }
 
 function loadModel() {
@@ -186,49 +406,61 @@ function loadModel() {
         size: size.clone(),
       };
 
-      colorizeModel(geometry, size.y);
+      const { floorGeometry, restGeometry } = buildModelGeometries(geometry, size.y);
 
-      const material = new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.78,
-        metalness: 0.0,
-        side: THREE.DoubleSide,
-        clippingPlanes: [clipPlane],
-        clipShadows: true,
-      });
-      const mesh = new THREE.Mesh(geometry, material);
+      // Boden mit Holzdielen-Textur
+      const floorMesh = new THREE.Mesh(
+        floorGeometry,
+        new THREE.MeshStandardMaterial({
+          map: makeFloorTexture(),
+          roughness: 0.62,
+          metalness: 0,
+          side: THREE.DoubleSide,
+          clippingPlanes: [clipPlane],
+        })
+      );
+      floorMesh.receiveShadow = true;
+      floorMesh.renderOrder = 5;
+      scene.add(floorMesh);
+
+      // Wände und Möbel (Vertexfarben)
+      const mesh = new THREE.Mesh(
+        restGeometry,
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.82,
+          metalness: 0.0,
+          side: THREE.DoubleSide,
+          clippingPlanes: [clipPlane],
+          clipShadows: true,
+        })
+      );
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.renderOrder = 6;
       scene.add(mesh);
 
       const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(geometry, 30),
+        new THREE.EdgesGeometry(restGeometry, 35),
         new THREE.LineBasicMaterial({
           color: COLORS.edge,
           transparent: true,
-          opacity: 0.4,
+          opacity: 0.22,
           clippingPlanes: [clipPlane],
         })
       );
       edges.renderOrder = 7;
       scene.add(edges);
 
-      // Boden-Scheibe mit Schattenempfang und feinem Raster
+      // Unsichtbare Fläche, die nur den Schattenwurf der Wohnung auf dem Hintergrund zeigt
       const ground = new THREE.Mesh(
-        new THREE.CircleGeometry(bounds.radius * 2.4, 72),
-        new THREE.MeshStandardMaterial({ color: COLORS.ground, roughness: 1, metalness: 0 })
+        new THREE.CircleGeometry(bounds.radius * 3, 72),
+        new THREE.ShadowMaterial({ color: 0x050d16, opacity: 0.38 })
       );
       ground.rotation.x = -Math.PI / 2;
       ground.position.y = -0.03;
       ground.receiveShadow = true;
       scene.add(ground);
-
-      const grid = new THREE.GridHelper(bounds.radius * 4.4, 44, 0x1d4a66, 0x12293a);
-      grid.position.y = -0.02;
-      grid.material.transparent = true;
-      grid.material.opacity = 0.55;
-      scene.add(grid);
 
       // Schatten-Kamera passend zur Modellgröße
       const sun = scene.userData.sun;
@@ -416,20 +648,106 @@ function renderLabels() {
     return el;
   });
   updateLabelPositions();
+  renderGlows();
 }
 
 const projected = new THREE.Vector3();
+function placeOverlay(el, x, y, z, w, h) {
+  projected.set(x, y, z).project(camera);
+  el.style.display = projected.z < 1 ? "" : "none";
+  el.style.left = `${(projected.x * 0.5 + 0.5) * w}px`;
+  el.style.top = `${(-projected.y * 0.5 + 0.5) * h}px`;
+}
+
 function updateLabelPositions() {
-  if (!camera || !labelEls.length) return;
+  if (!camera) return;
   const w = container.clientWidth;
   const h = container.clientHeight;
-  labelEls.forEach((el, i) => {
-    projected.set(rooms[i].x, LABEL_HEIGHT_M, rooms[i].z).project(camera);
-    const visible = projected.z < 1;
-    el.style.display = visible ? "" : "none";
-    el.style.left = `${(projected.x * 0.5 + 0.5) * w}px`;
-    el.style.top = `${(-projected.y * 0.5 + 0.5) * h}px`;
+  labelEls.forEach((el, i) => placeOverlay(el, rooms[i].x, LABEL_HEIGHT_M, rooms[i].z, w, h));
+  const cutY = clipPlane ? clipPlane.constant : 10;
+  badgeEls.forEach((el, i) => {
+    const o = openings[i];
+    if (o) placeOverlay(el, o.x, Math.min(o.head || 2, cutY) + 0.14, o.z, w, h);
   });
+}
+
+// Wärmeschein auf dem Boden unter jedem Raumschild (blau = kalt, grün = angenehm, orange/rot = warm),
+// wie das Leuchten der Lampen in den Home-Assistant-Grundrissen.
+let glowGroup = null;
+let glowTexture = null;
+
+function getGlowTexture() {
+  if (glowTexture) return glowTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  gradient.addColorStop(0, "rgba(255,255,255,0.95)");
+  gradient.addColorStop(0.45, "rgba(255,255,255,0.45)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 256);
+  glowTexture = new THREE.CanvasTexture(canvas);
+  glowTexture.colorSpace = THREE.SRGBColorSpace;
+  return glowTexture;
+}
+
+function renderGlows() {
+  if (!scene) return;
+  if (!glowGroup) {
+    glowGroup = new THREE.Group();
+    scene.add(glowGroup);
+  }
+  for (const child of glowGroup.children) {
+    child.geometry.dispose();
+    child.material.dispose();
+  }
+  glowGroup.clear();
+  for (const room of rooms) {
+    const live = thermostatsFor(room).filter((t) => typeof t.room_temp === "number");
+    if (!live.length) continue;
+    const avg = live.reduce((s, t) => s + t.room_temp, 0) / live.length;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(3, 3),
+      new THREE.MeshBasicMaterial({
+        map: getGlowTexture(),
+        color: tempColor(avg),
+        transparent: true,
+        opacity: 0.62,
+        depthWrite: false,
+        toneMapped: false,
+      })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(room.x, 0.13, room.z);
+    mesh.renderOrder = 6;
+    glowGroup.add(mesh);
+  }
+  requestRender();
+}
+
+// Runde Status-Symbole über Türen/Fenstern (nur sichtbar offen = orange, zu = kleiner grüner Punkt),
+// damit man den Zustand auch bei ganzen Wänden in der 3D-Ansicht sieht.
+const badgeLayer = document.createElement("div");
+badgeLayer.className = "fp-labels fp-badges";
+container.appendChild(badgeLayer);
+let badgeEls = [];
+let badgeSignature = "";
+
+function renderBadges() {
+  const signature = openings.map((o) => `${o.id}${o.open ? 1 : 0}`).join();
+  if (signature === badgeSignature) return;
+  badgeSignature = signature;
+  badgeLayer.replaceChildren();
+  badgeEls = openings.map((o) => {
+    const el = document.createElement("div");
+    el.className = `fp-badge ${o.open ? "open" : "closed"}`;
+    el.textContent = o.open ? (o.kind === "door" ? "🚪" : "🪟") : "";
+    el.title = `${o.name || (o.kind === "door" ? "Tür" : "Fenster")}: ${o.open ? "offen" : "zu"}`;
+    badgeLayer.appendChild(el);
+    return el;
+  });
+  updateLabelPositions();
 }
 
 async function loadRooms() {
@@ -760,9 +1078,12 @@ function applyOpeningData(list) {
   openings = list;
   if (signature !== layoutSignature) {
     layoutSignature = signature;
+    badgeSignature = "";
     buildAllOpenings();
+    renderBadges();
     return;
   }
+  renderBadges();
   for (const o of list) {
     const obj = openingObjs.get(o.id);
     if (!obj) continue;
@@ -831,6 +1152,7 @@ function toggleOpening(o) {
     obj.target = o.open ? 1 : 0;
     applyPose(obj);
   }
+  renderBadges();
   requestRender();
   sendOpeningState(o.id, o.open);
 }
