@@ -1188,7 +1188,17 @@ button.danger-link {
   top: 0;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* unsichtbare, größere Trefferfläche: der grüne Punkt ist nur 9 px klein, der Finger braucht mehr */
+.fp-badge::before {
+  content: "";
+  position: absolute;
+  inset: -18px;
+  border-radius: 50%;
 }
 
 .fp-badge.closed {

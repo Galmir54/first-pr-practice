@@ -1281,6 +1281,13 @@ function renderBadges() {
     el.className = `fp-badge ${o.open ? "open" : "closed"}`;
     el.textContent = o.open ? (o.kind === "window" ? "🪟" : "🚪") : "";
     el.title = `${openingLabel(o)}: ${o.open ? "offen" : "zu"}`;
+    // Nur der Punkt schaltet die Tür/das Fenster (nicht das 3D-Teil selbst). Der Zustand wird beim
+    // Antippen über die Id nachgeschlagen, weil der Server-Abruf die Objekte in `openings` ersetzt.
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const current = openings.find((x) => x.id === o.id);
+      if (current) toggleOpening(current);
+    });
     badgeLayer.appendChild(el);
     return el;
   });
@@ -1994,9 +2001,8 @@ function handleOpeningTap(e) {
       const p = floorPointFromClient(e.clientX, e.clientY);
       if (p) newOpening(p);
     }
-  } else if (hit) {
-    toggleOpening(hit);
   }
+  // Im Normalbetrieb schalten nur die Punkte (grün/orange), nicht die Türen und Fenster selbst.
 }
 
 // ---------------------------------------------------------------------------------------------
