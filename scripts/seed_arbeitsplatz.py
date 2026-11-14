@@ -67,6 +67,7 @@ tvs = [t for t in req("GET", base + "/api/floorplan/tvs")["tvs"] if t["id"] != "
 tvs = [{k: v for k, v in t.items() if k not in ("on", "power_w", "source")} for t in tvs]
 tvs.append(dict(id="tv2", name="Fernseher Schlafzimmer (LG)", x_front=-1.925, x_back=-0.975, z_min=0.29, z_max=0.34,
                 tv_z=0.0, tv_width=0.95, tv_height=0.56, soundbar=False, mount="wall", facing="+z", yaw=45, arm=0.75,
-                wall_x=round(WX + D[0] * 0.75, 3), wall_z=round(NZ + D[1] * 0.75, 3), y_bottom=1.32, device_id=None, ip=None))
+                wall_x=round(WX + D[0] * 0.75, 3), wall_z=round(NZ + D[1] * 0.75, 3), y_bottom=1.32,
+                device_id=5, on_watts=150, ip=None))  # Steckdose "Computer und Fernseher": ab 150 W gilt er als an
 out = req("PUT", base + "/api/floorplan/tvs", {"tvs": tvs})
 print("parts", len(parts), "tvs", [t["id"] for t in out["tvs"]])
