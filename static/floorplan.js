@@ -303,6 +303,25 @@ function buildModelGeometries(source, height) {
     if (kind[t] === 2 && wallZone[cellOf[t]]) kind[t] = 0;
   }
 
+  // Wandflächen, die bis zum Boden reichen (Ebene + Ausdehnung): Grundlage für Sockelleisten und Bilder
+  const wallFaces = [];
+  for (let t = 0; t < triCount; t++) {
+    if (kind[t] !== 0) continue;
+    a.fromBufferAttribute(pos, t * 3);
+    b.fromBufferAttribute(pos, t * 3 + 1);
+    c.fromBufferAttribute(pos, t * 3 + 2);
+    const yLow = Math.min(a.y, b.y, c.y);
+    const yHigh = Math.max(a.y, b.y, c.y);
+    if (yLow > 0.17 || yHigh < 0.35) continue;
+    const spreadX = Math.max(a.x, b.x, c.x) - Math.min(a.x, b.x, c.x);
+    const spreadZ = Math.max(a.z, b.z, c.z) - Math.min(a.z, b.z, c.z);
+    if (spreadX < 0.01 && spreadZ > 0.02) {
+      wallFaces.push({ axis: "x", plane: (a.x + b.x + c.x) / 3, a0: Math.min(a.z, b.z, c.z), a1: Math.max(a.z, b.z, c.z) });
+    } else if (spreadZ < 0.01 && spreadX > 0.02) {
+      wallFaces.push({ axis: "z", plane: (a.z + b.z + c.z) / 3, a0: Math.min(a.x, b.x, c.x), a1: Math.max(a.x, b.x, c.x) });
+    }
+  }
+
   // Möbelstücke = zusammenhängende Dreiecksgruppen außerhalb der Wände
   const parent = new Map();
   const find = (k) => {
@@ -383,7 +402,7 @@ function buildModelGeometries(source, height) {
 
   const furniture = [...groups.values()].map((g) => ({ box: g.box.clone(), tris: g.tris }));
 
-  return { floorGeometry, restGeometry, rugs, furniture, restTris, triColor, wallColor, grid: { wallZone, minX, minZ, gw, gh } };
+  return { floorGeometry, restGeometry, rugs, furniture, restTris, triColor, wallColor, wallFaces, grid: { wallZone, minX, minZ, gw, gh } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -506,12 +525,12 @@ const NEIGHBOURS = [
 ];
 
 // Ordnet jede Rasterzelle dem nächsten benannten Raum zu (-1 = keinem)
-function labelRoomCells(grid, roomList) {
+function labelRoomCells(grid, roomList, unlimited = false) {
   const { wallZone, minX, minZ, gw, gh } = grid;
   const label = new Int16Array(gw * gh).fill(-1);
   const dist = new Float32Array(gw * gh).fill(Infinity);
   const queue = [];
-  const limit = roomList.map((r) => (TILE_ROOM_PATTERN.test(r.name) ? TILE_MAX_RADIUS_M / GRID_CELL : Infinity));
+  const limit = roomList.map((r) => (!unlimited && TILE_ROOM_PATTERN.test(r.name) ? TILE_MAX_RADIUS_M / GRID_CELL : Infinity));
 
   roomList.forEach((room, i) => {
     if (!norm(room.name)) return;
@@ -794,7 +813,7 @@ function loadModel() {
         size: size.clone(),
       };
 
-      const { floorGeometry, restGeometry, rugs, furniture, restTris, triColor, wallColor, grid } =
+      const { floorGeometry, restGeometry, rugs, furniture, restTris, triColor, wallColor, wallFaces, grid } =
         buildModelGeometries(geometry, size.y);
       addRugs(rugs);
 
@@ -807,6 +826,7 @@ function loadModel() {
         restTris,
         triColor,
         wallColor,
+        wallFaces,
         aoTexture: makeFloorAoTexture(grid, furniture),
       };
       floorSignature = null;
@@ -844,6 +864,7 @@ function loadModel() {
       modelData.edgesMesh = edges;
       applyCabinets();
       applyTvs();
+      scheduleDecor();
 
       // Außenfläche rund um die Wohnung (nimmt auch den Schatten auf)
       const slab = new THREE.Mesh(
@@ -880,7 +901,7 @@ function loadModel() {
       setHint(null);
 
       // Zugriff für spätere Erweiterungen (Marker für Lampen/Steckdosen/Temperatur) und zum Testen.
-      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture };
+      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture, get decor() { return decorGroup; } };
     },
     undefined,
     () => {
@@ -1157,6 +1178,7 @@ function renderLabels() {
   updateLabelPositions();
   renderGlows();
   applyFloorTypes();
+  scheduleDecor();
 }
 
 const projected = new THREE.Vector3();
@@ -1730,6 +1752,21 @@ function buildOpening(o) {
   }
   pivots.forEach((p) => group.add(p.pivot));
 
+  if (o.kind === "door") {
+    // Türrahmen (Zarge): zwei Pfosten und ein Kopfstück, ragen auf beiden Wandseiten etwas heraus
+    const fw = 0.055;
+    const depth = o.thick + 0.03;
+    const jambH = o.head - FLOOR_TOP_M;
+    for (const sx of [-1, 1]) {
+      const jamb = box(fw, jambH, depth, mats.frame, false);
+      jamb.position.set(sx * (o.width / 2 + fw / 2), FLOOR_TOP_M + jambH / 2, 0);
+      group.add(jamb);
+    }
+    const lintel = box(o.width + fw * 2, fw, depth, mats.frame, false);
+    lintel.position.set(0, o.head + fw / 2, 0);
+    group.add(lintel);
+  }
+
   const stripY = (o.kind === "door" ? FLOOR_TOP_M : o.sill) + 0.012;
   const strip = new THREE.Mesh(
     new THREE.BoxGeometry(o.width, 0.024, Math.min(0.2, Math.max(0.08, o.thick * 0.8))),
@@ -1796,6 +1833,7 @@ function signatureOf(list) {
 function applyOpeningData(list) {
   const signature = signatureOf(list);
   openings = list;
+  scheduleDecor();
   if (signature !== layoutSignature) {
     layoutSignature = signature;
     badgeSignature = "";
@@ -2051,6 +2089,7 @@ function applyCabinets() {
     for (const c of cabinets) cabinetGroup.add(buildCabinetBody(c));
   }
   applyModelCutouts();
+  scheduleDecor();
 }
 
 // Alte Möbel-Blöcke aus dem Modell nehmen, die durch eigene Modelle (Schrank, Fernseher) ersetzt werden:
@@ -2254,6 +2293,7 @@ function applyTvs() {
   }
   renderTvBadges();
   applyModelCutouts();
+  scheduleDecor();
   requestRender();
 }
 
@@ -2275,6 +2315,479 @@ async function loadCabinets() {
     /* offline: vorhandene Schränke behalten */
   }
   applyCabinets();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Dekor: Sockelleisten, Vorhänge/Rollos, Pflanzen, Bilder
+//
+// Alles wird aus der Geometrie und den Räumen abgeleitet (nichts davon steht im STL):
+//  - Sockelleisten laufen an den Wandflächen entlang, die bis zum Boden reichen (dadurch bleiben
+//    Türen automatisch frei) und nur auf der Raumseite.
+//  - Fenster bekommen Vorhänge, im Schlafzimmer wie auf dem Foto ein aubergine-farbenes Rollo.
+//  - Pflanzen stehen in freien Raumecken, Bilder hängen an freien Wandstücken.
+// ---------------------------------------------------------------------------------------------
+let decorGroup = null;
+let decorSignature = "";
+let decorTimer = null;
+let decorMaterials = null;
+
+function getDecorMaterials() {
+  if (decorMaterials) return decorMaterials;
+  const clip = { clippingPlanes: [clipPlane], clipShadows: true };
+  const std = (color, roughness = 0.8, extra = {}) =>
+    new THREE.MeshStandardMaterial({ color, roughness, metalness: 0, ...extra, ...clip });
+  const folds = (() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 8;
+    const ctx = canvas.getContext("2d");
+    for (let x = 0; x < 128; x++) {
+      const v = 0.88 + 0.12 * Math.sin((x / 128) * Math.PI * 2 * 7);
+      const g = Math.round(255 * v);
+      ctx.fillStyle = `rgb(${g},${g},${g})`;
+      ctx.fillRect(x, 0, 1, 8);
+    }
+    const t = new THREE.CanvasTexture(canvas);
+    t.wrapS = THREE.RepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
+  decorMaterials = {
+    baseboard: std(0xf1f0ec, 0.55),
+    rod: std(0x9aa0a6, 0.4),
+    curtain: std(0xe4dccd, 0.95, { map: folds }),
+    curtainDark: std(0xb9a98f, 0.95, { map: folds }),
+    rollo: std(0x6d2a58, 0.9),
+    rolloCase: std(0xe9e9e6, 0.6),
+    soil: std(0x3b2f26, 1),
+    potTerracotta: std(0xc08a68, 0.85),
+    potWhite: std(0xeceae4, 0.5),
+    potGrey: std(0x7f868c, 0.7),
+    leaves: [0x4f7f4a, 0x5e8d52, 0x3f6e46, 0x6b9a58].map((c) => std(c, 0.75, { side: THREE.DoubleSide })),
+    trunk: std(0x7a5a3c, 0.9),
+    frame: [0x1f1f21, 0xf3f1ec, 0xb8a07e].map((c) => std(c, 0.55)),
+  };
+  return decorMaterials;
+}
+
+function mergeBoxes(specs, material) {
+  // specs: [{ w, h, d, x, y, z }] -> eine einzige Geometrie (wenige Zeichenaufrufe)
+  const positions = [];
+  const normals = [];
+  for (const s of specs) {
+    const g = new THREE.BoxGeometry(s.w, s.h, s.d).toNonIndexed();
+    g.translate(s.x, s.y, s.z);
+    positions.push(...g.getAttribute("position").array);
+    normals.push(...g.getAttribute("normal").array);
+    g.dispose();
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function gridIndex(grid, x, z) {
+  const gx = Math.floor((x - grid.minX) / GRID_CELL);
+  const gz = Math.floor((z - grid.minZ) / GRID_CELL);
+  if (gx < 0 || gz < 0 || gx >= grid.gw || gz >= grid.gh) return -1;
+  return gz * grid.gw + gx;
+}
+
+function roomNameAt(grid, label, x, z) {
+  const idx = gridIndex(grid, x, z);
+  if (idx < 0 || label[idx] < 0) return null;
+  return rooms[label[idx]] ? norm(rooms[label[idx]].name) : null;
+}
+
+// Wohin zeigt die freie Raumseite einer Wandfläche (+1/-1) und gehört sie zu einem Raum?
+function faceSide(grid, label, face) {
+  const mid = (face.a0 + face.a1) / 2;
+  for (const side of [1, -1]) {
+    const px = face.axis === "x" ? face.plane + side * 0.16 : mid;
+    const pz = face.axis === "x" ? mid : face.plane + side * 0.16;
+    const idx = gridIndex(grid, px, pz);
+    if (idx >= 0 && label[idx] >= 0) return side;
+  }
+  return 0;
+}
+
+function addBaseboards(group, grid, label, mats) {
+  const buckets = new Map();
+  for (const f of modelData.wallFaces) {
+    const side = faceSide(grid, label, f);
+    if (!side) continue;
+    const key = `${f.axis}|${Math.round(f.plane * 200)}|${side}`;
+    if (!buckets.has(key)) buckets.set(key, { axis: f.axis, plane: f.plane, side, spans: [] });
+    buckets.get(key).spans.push([f.a0, f.a1]);
+  }
+  const specs = [];
+  const height = 0.085;
+  const thick = 0.014;
+  for (const b of buckets.values()) {
+    b.spans.sort((p, q) => p[0] - q[0]);
+    const merged = [];
+    for (const span of b.spans) {
+      const last = merged[merged.length - 1];
+      if (last && span[0] <= last[1] + 0.02) last[1] = Math.max(last[1], span[1]);
+      else merged.push([...span]);
+    }
+    for (const [a0, a1] of merged) {
+      if (a1 - a0 < 0.12) continue;
+      const mid = (a0 + a1) / 2;
+      const off = b.plane + b.side * (thick / 2);
+      const y = FLOOR_TOP_M + height / 2;
+      specs.push(b.axis === "x" ? { w: thick, h: height, d: a1 - a0, x: off, y, z: mid } : { w: a1 - a0, h: height, d: thick, x: mid, y, z: off });
+    }
+  }
+  if (specs.length) group.add(mergeBoxes(specs, mats.baseboard));
+}
+
+function windowDecor(group, grid, label, mats) {
+  for (const o of openings) {
+    if (o.kind !== "window") continue;
+    const local = new THREE.Group();
+    local.position.set(o.x, 0, o.z);
+    local.rotation.y = o.along ? -Math.PI / 2 : 0;
+    const side = o.swing || 1;
+    const lz = side * (o.thick / 2 + 0.055);
+    // Raum hinter dem Fenster (auf der Raumseite)
+    const sx = o.along ? o.x - side * 0.4 : o.x;
+    const sz = o.along ? o.z : o.z + side * 0.4;
+    const room = roomNameAt(grid, label, sx, sz) || "";
+
+    // Fensterbank innen
+    const sill = box(o.width + 0.1, 0.03, o.thick + 0.1, mats.baseboard, false);
+    sill.position.set(0, o.sill - 0.015, side * 0.05);
+    local.add(sill);
+
+    const top = o.head + 0.18;
+    if (/schlaf/.test(room)) {
+      // Rollo wie auf dem Foto: aubergine, etwa zu einem Drittel heruntergelassen
+      const drop = (o.head - o.sill) * 0.35;
+      const casing = box(o.width + 0.06, 0.07, 0.08, mats.rolloCase, false);
+      casing.position.set(0, o.head + 0.03, lz);
+      const cloth = box(o.width - 0.02, drop, 0.015, mats.rollo, false);
+      cloth.position.set(0, o.head - drop / 2, lz);
+      local.add(casing, cloth);
+    } else {
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, o.width + 0.7, 8), mats.rod);
+      rod.rotation.z = Math.PI / 2;
+      rod.position.set(0, top, lz);
+      local.add(rod);
+      const panelW = 0.34;
+      const h = top - 0.12 - FLOOR_TOP_M;
+      const material = /kinder|arbeit/.test(room) ? mats.curtainDark : mats.curtain;
+      for (const dx of [-1, 1]) {
+        const panel = box(panelW, h, 0.05, material, false);
+        panel.position.set(dx * (o.width / 2 + 0.1 + panelW / 2 - 0.08), FLOOR_TOP_M + 0.12 + h / 2, lz);
+        local.add(panel);
+      }
+    }
+    group.add(local);
+  }
+}
+
+// freie Rasterzellen messen: Abstand (in Zellen) zu markierten Zellen, begrenzt
+function cellDistance(grid, marked, limit) {
+  const { gw, gh } = grid;
+  const dist = new Uint8Array(gw * gh).fill(limit);
+  const queue = [];
+  for (let i = 0; i < marked.length; i++) {
+    if (marked[i]) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  }
+  for (let head = 0; head < queue.length; head++) {
+    const idx = queue[head];
+    if (dist[idx] + 1 >= limit) continue;
+    const x = idx % gw;
+    const z = (idx - x) / gw;
+    for (const [dx, dz] of NEIGHBOURS) {
+      const nx = x + dx;
+      const nz = z + dz;
+      if (nx < 0 || nz < 0 || nx >= gw || nz >= gh) continue;
+      const n = nz * gw + nx;
+      if (dist[n] > dist[idx] + 1) {
+        dist[n] = dist[idx] + 1;
+        queue.push(n);
+      }
+    }
+  }
+  return dist;
+}
+
+function markRect(grid, mask, minX, maxX, minZ, maxZ, pad = 0) {
+  const x0 = Math.max(0, Math.floor((minX - pad - grid.minX) / GRID_CELL));
+  const x1 = Math.min(grid.gw - 1, Math.ceil((maxX + pad - grid.minX) / GRID_CELL));
+  const z0 = Math.max(0, Math.floor((minZ - pad - grid.minZ) / GRID_CELL));
+  const z1 = Math.min(grid.gh - 1, Math.ceil((maxZ + pad - grid.minZ) / GRID_CELL));
+  for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) mask[z * grid.gw + x] = 1;
+}
+
+function makePlant(seed, mats) {
+  const g = new THREE.Group();
+  const pots = [mats.potTerracotta, mats.potWhite, mats.potGrey];
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.1, 0.28, 18), pots[Math.floor(seed * 7) % 3]);
+  pot.position.y = 0.14;
+  pot.castShadow = true;
+  g.add(pot);
+  const soil = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.02, 14), mats.soil);
+  soil.position.y = 0.285;
+  g.add(soil);
+  const tall = seed > 0.5;
+  if (tall) {
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.022, 0.75, 8), mats.trunk);
+    trunk.position.y = 0.28 + 0.375;
+    g.add(trunk);
+  }
+  const leafCount = tall ? 9 : 12;
+  for (let i = 0; i < leafCount; i++) {
+    const r1 = hash01(seed * 31 + i, 1.3);
+    const r2 = hash01(seed * 17 + i, 2.9);
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6), mats.leaves[i % mats.leaves.length]);
+    leaf.castShadow = true;
+    const length = tall ? 0.34 : 0.22 + r2 * 0.08;
+    leaf.scale.set(0.06, 0.012, length);
+    const yaw = (i / leafCount) * Math.PI * 2 + r1;
+    const tilt = tall ? 0.35 + r2 * 0.5 : 0.6 + r2 * 0.7;
+    const baseY = tall ? 0.28 + 0.72 : 0.3;
+    // Blatt wächst schräg nach außen/oben aus der Mitte
+    leaf.position.set(Math.sin(yaw) * length * Math.cos(tilt) * 0.9, baseY + Math.sin(tilt) * length * 0.8 - (tall ? 0.05 : 0), Math.cos(yaw) * length * Math.cos(tilt) * 0.9);
+    leaf.rotation.set(0, yaw, 0);
+    leaf.rotateX(-tilt);
+    g.add(leaf);
+  }
+  return g;
+}
+
+function addPlants(group, grid, label, mats) {
+  const { wallZone, gw, gh } = grid;
+  const occupied = new Uint8Array(gw * gh);
+  for (const f of modelData.furniture) {
+    if (f.box.max.y - f.box.min.y < 0.2) continue;
+    markRect(grid, occupied, f.box.min.x, f.box.max.x, f.box.min.z, f.box.max.z);
+  }
+  for (const c of cabinets) {
+    const r = cabinetRect(c);
+    markRect(grid, occupied, r.minX, r.maxX, r.minZ, r.maxZ, 0.5); // Platz zum Türenöffnen
+  }
+  for (const t of tvs) markRect(grid, occupied, Math.min(t.x_front, t.x_back), Math.max(t.x_front, t.x_back), t.z_min, t.z_max, 0.3);
+  const nearOpening = new Uint8Array(gw * gh);
+  for (const o of openings) {
+    if (o.kind === "cabinet") continue;
+    markRect(grid, nearOpening, o.x - o.width / 2 - 0.15, o.x + o.width / 2 + 0.15, o.z - o.width / 2 - 0.15, o.z + o.width / 2 + 0.15, 0.35);
+  }
+  const wallDist = cellDistance(grid, wallZone, 40);
+  const furnDist = cellDistance(grid, occupied, 40);
+  const openDist = cellDistance(grid, nearOpening, 40);
+
+  const wanted = [
+    [/wohn/, 2],
+    [/schlaf/, 1],
+    [/kinder/, 1],
+    [/arbeit/, 1],
+    [/flur/, 1],
+  ];
+  const taken = [];
+  for (const [pattern, count] of wanted) {
+    for (let n = 0; n < count; n++) {
+      let best = null;
+      for (let idx = 0; idx < label.length; idx++) {
+        const ownerIdx = label[idx];
+        if (ownerIdx < 0 || !pattern.test(norm(rooms[ownerIdx].name))) continue;
+        if (wallZone[idx] || wallDist[idx] < 4 || wallDist[idx] > 10 || furnDist[idx] < 10 || openDist[idx] < 4) continue;
+        const x = grid.minX + ((idx % gw) + 0.5) * GRID_CELL;
+        const z = grid.minZ + (Math.floor(idx / gw) + 0.5) * GRID_CELL;
+        if (taken.some((p) => Math.hypot(p[0] - x, p[1] - z) < 1.6)) continue;
+        // Ecken-Wert: wie viele Wandzellen liegen im Umkreis von ~0,6 m?
+        let corner = 0;
+        const cx = idx % gw;
+        const cz = Math.floor(idx / gw);
+        for (let dz = -12; dz <= 12; dz += 2) {
+          for (let dx = -12; dx <= 12; dx += 2) {
+            const xx = cx + dx;
+            const zz = cz + dz;
+            if (xx >= 0 && zz >= 0 && xx < gw && zz < gh && wallZone[zz * gw + xx]) corner++;
+          }
+        }
+        const score = corner + hash01(idx, n) * 2;
+        if (!best || score > best.score) best = { score, x, z };
+      }
+      if (best) {
+        taken.push([best.x, best.z]);
+        const plant = makePlant(hash01(best.x * 3.7, best.z * 2.3), mats);
+        plant.position.set(best.x, FLOOR_TOP_M, best.z);
+        group.add(plant);
+      }
+    }
+  }
+}
+
+function addPictures(group, grid, label, mats) {
+  const tall = modelData.furniture.filter((f) => f.box.max.y > 1.1);
+  const wanted = [
+    [/wohn/, 2],
+    [/flur/, 2],
+    [/schlaf/, 1],
+    [/kinder/, 1],
+    [/arbeit/, 1],
+  ];
+  const faces = [];
+  for (const f of modelData.wallFaces) {
+    const side = faceSide(grid, label, f);
+    if (side) faces.push({ ...f, side });
+  }
+  // zusammenhängende Wandstücke (gleiche Ebene, aneinander grenzend) zusammenfassen
+  const merged = [];
+  const byKey = new Map();
+  for (const f of faces) {
+    const key = `${f.axis}|${Math.round(f.plane * 200)}|${f.side}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push([f.a0, f.a1]);
+  }
+  for (const [key, spans] of byKey) {
+    const [axis, planeKey, side] = key.split("|");
+    spans.sort((p, q) => p[0] - q[0]);
+    const runs = [];
+    for (const s of spans) {
+      const last = runs[runs.length - 1];
+      if (last && s[0] <= last[1] + 0.02) last[1] = Math.max(last[1], s[1]);
+      else runs.push([...s]);
+    }
+    for (const [a0, a1] of runs) {
+      if (a1 - a0 >= 1.0) merged.push({ axis, plane: Number(planeKey) / 200, side: Number(side), a0, a1 });
+    }
+  }
+
+  const blocked = (x, z, w) => {
+    for (const f of tall) {
+      if (x > f.box.min.x - 0.15 - w && x < f.box.max.x + 0.15 + w && z > f.box.min.z - 0.15 - w && z < f.box.max.z + 0.15 + w) return true;
+    }
+    for (const c of cabinets) {
+      const r = cabinetRect(c);
+      if (x > r.minX - w && x < r.maxX + 0.5 + w && z > r.minZ - w && z < r.maxZ + w) return true;
+    }
+    for (const t of tvs) {
+      if (x > Math.min(t.x_front, t.x_back) - 0.3 - w && z > t.z_min - 0.25 - w && z < t.z_max + 0.25 + w) return true;
+    }
+    for (const o of openings) {
+      if (Math.hypot(o.x - x, o.z - z) < o.width / 2 + 0.3 + w) return true;
+    }
+    return false;
+  };
+
+  const used = [];
+  for (const [pattern, count] of wanted) {
+    const mine = merged
+      .filter((m) => {
+        const mid = (m.a0 + m.a1) / 2;
+        const px = m.axis === "x" ? m.plane + m.side * 0.2 : mid;
+        const pz = m.axis === "x" ? mid : m.plane + m.side * 0.2;
+        return pattern.test(roomNameAt(grid, label, px, pz) || "");
+      })
+      .sort((p, q) => q.a1 - q.a0 - (p.a1 - p.a0));
+    let placed = 0;
+    for (const m of mine) {
+      if (placed >= count) break;
+      const portrait = hash01(m.plane * 5, m.a0) > 0.6;
+      const w = portrait ? 0.5 : 0.72;
+      const h = portrait ? 0.7 : 0.5;
+      // in Schritten von 25 cm über das Wandstück laufen und den ersten freien Platz nehmen
+      for (let a = m.a0 + w / 2 + 0.25; a <= m.a1 - w / 2 - 0.25; a += 0.25) {
+        const x = m.axis === "x" ? m.plane : a;
+        const z = m.axis === "x" ? a : m.plane;
+        if (blocked(x, z, w / 2)) continue;
+        if (used.some((u) => Math.hypot(u[0] - x, u[1] - z) < 1.1)) continue;
+        used.push([x, z]);
+        placed++;
+        group.add(makePicture(m, a, w, h, mats));
+        break;
+      }
+    }
+  }
+}
+
+function makePicture(wall, along, w, h, mats) {
+  const seed = hash01(wall.plane * 9.1, along * 3.3);
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = Math.round((256 * h) / w);
+  const ctx = canvas.getContext("2d");
+  const palettes = [
+    ["#e9d8b8", "#c9805a", "#44596b", "#f2ede2"],
+    ["#dfe8e4", "#7da08a", "#2f4a45", "#f6f2ea"],
+    ["#f1e0d6", "#d39a8c", "#5b4b6b", "#faf5ef"],
+    ["#e3e9f1", "#8aa6c4", "#364c63", "#f3f0e8"],
+  ];
+  const pal = palettes[Math.floor(seed * palettes.length) % palettes.length];
+  ctx.fillStyle = pal[3];
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < 5; i++) {
+    ctx.fillStyle = pal[i % 3];
+    ctx.globalAlpha = 0.85;
+    const r = 22 + hash01(seed * 50 + i, 1) * 60;
+    ctx.beginPath();
+    if (i % 2) ctx.arc(hash01(seed, i + 2) * canvas.width, hash01(seed, i + 3) * canvas.height, r, 0, Math.PI * 2);
+    else ctx.rect(hash01(seed, i + 4) * canvas.width * 0.7, hash01(seed, i + 5) * canvas.height * 0.7, r * 2, r * 1.2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  const art = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshStandardMaterial({ map: (() => { const t = new THREE.CanvasTexture(canvas); t.colorSpace = THREE.SRGBColorSpace; return t; })(), roughness: 0.9, clippingPlanes: [clipPlane] })
+  );
+  const frame = box(w + 0.07, h + 0.07, 0.03, mats.frame[Math.floor(seed * 3 + 0.5) % 3], false);
+  const group = new THREE.Group();
+  group.add(frame);
+  art.position.z = 0.0165;
+  group.add(art);
+  const x = wall.axis === "x" ? wall.plane + wall.side * 0.016 : along;
+  const z = wall.axis === "x" ? along : wall.plane + wall.side * 0.016;
+  group.position.set(x, 1.55, z);
+  // Blickrichtung: +z-Normale der Ebene soll zur freien Raumseite zeigen
+  group.rotation.y = wall.axis === "x" ? (wall.side > 0 ? Math.PI / 2 : -Math.PI / 2) : wall.side > 0 ? 0 : Math.PI;
+  return group;
+}
+
+function buildDecor() {
+  if (!scene || !modelData || !modelData.wallFaces) return;
+  const signature = JSON.stringify([
+    rooms.map((r) => [r.x, r.z, norm(r.name)]),
+    openings.map((o) => [o.id, o.kind, o.x, o.z, o.width, o.along, o.sill, o.head, o.swing, o.thick]),
+    cabinets,
+    tvs.map((t) => [t.x_front, t.x_back, t.z_min, t.z_max]),
+  ]);
+  if (signature === decorSignature) return;
+  decorSignature = signature;
+
+  if (!decorGroup) {
+    decorGroup = new THREE.Group();
+    scene.add(decorGroup);
+  }
+  for (const child of [...decorGroup.children]) child.traverse((n) => n.geometry && n.geometry.dispose());
+  decorGroup.clear();
+
+  const grid = modelData.grid;
+  const label = labelRoomCells(grid, rooms, true);
+  const mats = getDecorMaterials();
+  addBaseboards(decorGroup, grid, label, mats);
+  windowDecor(decorGroup, grid, label, mats);
+  addPlants(decorGroup, grid, label, mats);
+  addPictures(decorGroup, grid, label, mats);
+  requestRender();
+}
+
+// Räume, Fenster, Schränke und Fernseher kommen nacheinander vom Server: kurz warten, einmal bauen
+function scheduleDecor() {
+  if (decorTimer !== null) return;
+  decorTimer = setTimeout(() => {
+    decorTimer = null;
+    buildDecor();
+  }, 120);
 }
 
 function startViewer() {
