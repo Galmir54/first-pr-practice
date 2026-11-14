@@ -27,6 +27,14 @@ const COLORS = {
   edge: 0x1a2a38,
 };
 
+// Look: "neu" = weicher (Umgebungslicht, Kontaktschatten, matte Flächen), "klassisch" = bisheriger Stil.
+let lookNew = true;
+try {
+  lookNew = localStorage.getItem("fp.look") !== "old";
+} catch {
+  /* ohne Speicher gilt der neue Look */
+}
+
 const panel = document.getElementById("panel-floorplan");
 const container = document.getElementById("stlViewerContainer");
 const hint = document.getElementById("stlViewerHint");
@@ -71,7 +79,7 @@ function initScene() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap; // erlaubt weiche Kanten über shadow.radius
   renderer.localClippingEnabled = true;
   container.appendChild(renderer.domElement);
 
@@ -79,16 +87,20 @@ function initScene() {
   camera = new THREE.PerspectiveCamera(38, 1, 0.1, 600);
 
   // helles, freundliches Licht: kräftiges Umgebungslicht, weiche Sonne von vorn-rechts, Gegenlicht ohne Schatten
-  scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x6b5a4a, 1.75));
+  const hemi = new THREE.HemisphereLight(0xeaf2ff, 0x6b5a4a, 1.75);
+  scene.add(hemi);
   const fill = new THREE.DirectionalLight(0xdbe8ff, 0.7);
   fill.position.set(-10, 9, -6);
   scene.add(fill);
+  scene.userData.hemi = hemi;
+  scene.userData.fill = fill;
   const sun = new THREE.DirectionalLight(0xfff1de, 1.35);
   sun.position.set(9, 16, 7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
+  sun.shadow.radius = 3;
   scene.add(sun);
   scene.userData.sun = sun;
 
@@ -198,17 +210,35 @@ function subsetGeometry(source, triangles) {
 
 function buildRestGeometry(source, triangles, triColor, fallbackColor) {
   const geometry = subsetGeometry(source, triangles);
-  const colors = new Float32Array(triangles.length * 9);
+  const pos = geometry.getAttribute("position");
+  const flat = new Float32Array(triangles.length * 9);
+  const shaded = new Float32Array(triangles.length * 9);
   triangles.forEach((t, i) => {
     const col = triColor[t] || fallbackColor;
     for (let v = 0; v < 3; v++) {
-      colors[i * 9 + v * 3] = col.r;
-      colors[i * 9 + v * 3 + 1] = col.g;
-      colors[i * 9 + v * 3 + 2] = col.b;
+      const k = i * 9 + v * 3;
+      flat[k] = col.r;
+      flat[k + 1] = col.g;
+      flat[k + 2] = col.b;
+      // Neuer Look: nach unten hin dunkler (Boden-Kontaktschatten), ohne Raytracing
+      const y = pos.getY(i * 3 + v);
+      const u = Math.min(1, Math.max(0, (y - FLOOR_TOP_M) / 1.3));
+      const f = 0.78 + 0.22 * (u * u * (3 - 2 * u));
+      shaded[k] = col.r * f;
+      shaded[k + 1] = col.g * f;
+      shaded[k + 2] = col.b * f;
     }
   });
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geometry.userData.colorFlat = flat;
+  geometry.userData.colorShaded = shaded;
+  geometry.setAttribute("color", new THREE.BufferAttribute(lookNew ? shaded.slice() : flat.slice(), 3));
   return geometry;
+}
+
+function setRestColors(geometry) {
+  const attr = geometry.getAttribute("color");
+  attr.array.set(lookNew ? geometry.userData.colorShaded : geometry.userData.colorFlat);
+  attr.needsUpdate = true;
 }
 
 function buildModelGeometries(source, height) {
@@ -407,12 +437,63 @@ function makeTileTexture() {
   return texture;
 }
 
+// Ambient-Occlusion-Karte für den Boden: Entfernung zu Wänden und Möbeln, weich verlaufend.
+function makeFloorAoTexture(grid, furniture) {
+  const { wallZone, minX, minZ, gw, gh } = grid;
+  let field = new Float32Array(gw * gh);
+  for (let i = 0; i < field.length; i++) if (wallZone[i]) field[i] = 1;
+  for (const f of furniture) {
+    if (f.box.max.y - f.box.min.y < 0.25) continue; // flache Dinge (Teppiche, Bodenreste) werfen keinen Schatten
+    const x0 = Math.max(0, Math.floor((f.box.min.x - minX) / GRID_CELL));
+    const x1 = Math.min(gw - 1, Math.ceil((f.box.max.x - minX) / GRID_CELL));
+    const z0 = Math.max(0, Math.floor((f.box.min.z - minZ) / GRID_CELL));
+    const z1 = Math.min(gh - 1, Math.ceil((f.box.max.z - minZ) / GRID_CELL));
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) field[z * gw + x] = Math.max(field[z * gw + x], 0.8);
+  }
+  // weich machen: mehrfacher Box-Blur (Radius ~ 12 cm je Durchgang)
+  const radius = 3;
+  const blur = (src) => {
+    const tmp = new Float32Array(src.length);
+    const out = new Float32Array(src.length);
+    for (let z = 0; z < gh; z++) {
+      for (let x = 0; x < gw; x++) {
+        let sum = 0;
+        for (let d = -radius; d <= radius; d++) sum += src[z * gw + Math.min(gw - 1, Math.max(0, x + d))];
+        tmp[z * gw + x] = sum / (radius * 2 + 1);
+      }
+    }
+    for (let z = 0; z < gh; z++) {
+      for (let x = 0; x < gw; x++) {
+        let sum = 0;
+        for (let d = -radius; d <= radius; d++) sum += tmp[Math.min(gh - 1, Math.max(0, z + d)) * gw + x];
+        out[z * gw + x] = sum / (radius * 2 + 1);
+      }
+    }
+    return out;
+  };
+  for (let pass = 0; pass < 3; pass++) field = blur(field);
+
+  const data = new Uint8Array(gw * gh * 4);
+  for (let i = 0; i < field.length; i++) {
+    const v = Math.round(255 * (1 - Math.min(0.62, field[i] * 0.9)));
+    data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = v;
+    data[i * 4 + 3] = 255;
+  }
+  const texture = new THREE.DataTexture(data, gw, gh, THREE.RGBAFormat);
+  texture.flipY = false;
+  texture.magFilter = texture.minFilter = THREE.LinearFilter;
+  texture.channel = 1; // eigene UV-Kanal (uv1), unabhängig von der Dielen-/Fliesentextur
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function getFloorMaterials() {
   if (floorMaterials) return floorMaterials;
   const common = { metalness: 0, side: THREE.DoubleSide, clippingPlanes: [clipPlane] };
+  const ao = modelData && modelData.aoTexture ? { aoMap: modelData.aoTexture, aoMapIntensity: lookNew ? 1 : 0 } : {};
   floorMaterials = {
-    wood: new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.62, ...common }),
-    tile: new THREE.MeshStandardMaterial({ map: makeTileTexture(), roughness: 0.35, ...common }),
+    wood: new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.62, ...ao, ...common }),
+    tile: new THREE.MeshStandardMaterial({ map: makeTileTexture(), roughness: 0.35, ...ao, ...common }),
   };
   return floorMaterials;
 }
@@ -536,6 +617,13 @@ function applyFloorTypes() {
       uv[i * 2 + 1] = p.getZ(i) / uvScale[1];
     }
     geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    // zweiter UV-Satz: Lage im Grundriss (für die AO-Karte)
+    const uv1 = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) {
+      uv1[i * 2] = (p.getX(i) - grid.minX) / (grid.gw * GRID_CELL);
+      uv1[i * 2 + 1] = (p.getZ(i) - grid.minZ) / (grid.gh * GRID_CELL);
+    }
+    geo.setAttribute("uv1", new THREE.BufferAttribute(uv1, 2));
     const mesh = new THREE.Mesh(geo, material);
     mesh.receiveShadow = true;
     mesh.renderOrder = 5;
@@ -624,15 +712,15 @@ function addRugs(rugs) {
 }
 
 // Blaue Außenfläche (Grundstück/Terrasse) rund um die Wohnung, wie auf den Home-Assistant-Plänen
-function makeGroundTexture() {
+function makeGroundTexture(base = "#2f5f86", speckle = [40, 80, 130]) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 256;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#2f5f86";
+  ctx.fillStyle = base;
   ctx.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 2600; i++) {
-    const tone = 40 + Math.floor(hash01(i, 1.7) * 60);
-    ctx.fillStyle = `rgba(${tone},${tone + 40},${tone + 90},0.22)`;
+    const tone = Math.floor(hash01(i, 1.7) * 60);
+    ctx.fillStyle = `rgba(${speckle[0] + tone},${speckle[1] + tone},${speckle[2] + tone},0.22)`;
     ctx.fillRect(hash01(i, 2.9) * 256, hash01(i, 5.3) * 256, 2, 2);
   }
   const texture = new THREE.CanvasTexture(canvas);
@@ -711,7 +799,16 @@ function loadModel() {
       addRugs(rugs);
 
       // Boden: Holzdielen, in Küche und Bad Fliesen (siehe applyFloorTypes)
-      modelData = { floorGeometry, grid, source: geometry, furniture, restTris, triColor, wallColor };
+      modelData = {
+        floorGeometry,
+        grid,
+        source: geometry,
+        furniture,
+        restTris,
+        triColor,
+        wallColor,
+        aoTexture: makeFloorAoTexture(grid, furniture),
+      };
       floorSignature = null;
       applyFloorTypes();
 
@@ -757,6 +854,11 @@ function loadModel() {
       slab.position.y = -0.02;
       slab.receiveShadow = true;
       scene.add(slab);
+      modelData.slab = slab;
+      modelData.slabTextures = {
+        old: slab.material.map,
+        new: makeGroundTexture("#4a5d70", [70, 85, 100]), // ruhiges Schiefergrau-Blau statt kräftigem Blau
+      };
 
       // Schatten-Kamera passend zur Modellgröße
       const sun = scene.userData.sun;
@@ -771,6 +873,7 @@ function loadModel() {
       cutSlider.min = "0.3";
       cutSlider.max = String(bounds.height.toFixed(2));
       resetCut();
+      applyLook(lookNew, false);
 
       setView("top");
       toolbar.classList.remove("hidden");
@@ -787,6 +890,86 @@ function loadModel() {
     }
   );
 }
+
+// Umgebungslicht als kleine, selbst erzeugte Bildquelle (Himmel + weiche Lichtfläche), per PMREM
+// vorgefiltert: gibt allen Flächen weiches, richtungsloses Licht statt harter Schatten.
+let environmentTexture = null;
+
+function getEnvironment() {
+  if (environmentTexture) return environmentTexture;
+  const envScene = new THREE.Scene();
+  const sphere = new THREE.SphereGeometry(20, 32, 16);
+  const colors = [];
+  const top = new THREE.Color(0xdbe6f2);
+  const horizon = new THREE.Color(0xf1e8dc);
+  const ground = new THREE.Color(0x7d6d5c);
+  const pos = sphere.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    const t = pos.getY(i) / 20;
+    const c = t >= 0 ? horizon.clone().lerp(top, Math.pow(t, 0.7)) : horizon.clone().lerp(ground, Math.min(1, -t * 1.6));
+    colors.push(c.r, c.g, c.b);
+  }
+  sphere.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  envScene.add(new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(18, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 2.5, 2.3), side: THREE.DoubleSide }));
+  panel.position.set(8, 13, 6);
+  panel.lookAt(0, 0, 0);
+  envScene.add(panel);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  environmentTexture = pmrem.fromScene(envScene, 0.04).texture;
+  pmrem.dispose();
+  return environmentTexture;
+}
+
+const lookButtons = [...document.querySelectorAll(".fp-btn[data-look]")];
+
+// Schaltet zwischen "neu" (weich) und "klassisch" um, ohne die Seite neu zu laden.
+function applyLook(isNew, remember = true) {
+  lookNew = isNew;
+  if (remember) {
+    try {
+      localStorage.setItem("fp.look", isNew ? "new" : "old");
+    } catch {
+      /* gilt dann nur bis zum Neuladen */
+    }
+  }
+  lookButtons.forEach((b) => b.classList.toggle("active", (b.dataset.look === "new") === isNew));
+  container.classList.toggle("look-new", isNew);
+  if (!scene) return;
+
+  scene.environment = isNew ? getEnvironment() : null;
+  renderer.toneMappingExposure = isNew ? 1.0 : 1.12;
+  const { hemi, fill, sun } = scene.userData;
+  hemi.intensity = isNew ? 0.55 : 1.75;
+  fill.intensity = isNew ? 0.3 : 0.7;
+  sun.intensity = isNew ? 1.25 : 1.35;
+  sun.shadow.radius = isNew ? 4 : 2;
+
+  if (modelData) {
+    if (modelData.restMesh) {
+      modelData.restMesh.material.roughness = isNew ? 0.95 : 0.82;
+      setRestColors(modelData.restMesh.geometry);
+    }
+    if (modelData.edgesMesh) modelData.edgesMesh.material.opacity = isNew ? 0.07 : 0.22;
+    if (modelData.slab) {
+      modelData.slab.material.map = isNew ? modelData.slabTextures.new : modelData.slabTextures.old;
+      modelData.slab.material.color.set(0xffffff);
+    }
+  }
+  if (floorMaterials) {
+    floorMaterials.wood.roughness = isNew ? 0.78 : 0.62;
+    floorMaterials.tile.roughness = isNew ? 0.5 : 0.35;
+    floorMaterials.wood.aoMapIntensity = floorMaterials.tile.aoMapIntensity = isNew ? 1 : 0;
+  }
+  // Umgebungslicht ändert die Shader: Materialien neu übersetzen lassen
+  scene.traverse((o) => {
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    mats.forEach((m) => (m.needsUpdate = true));
+  });
+  requestRender();
+}
+
+lookButtons.forEach((b) => b.addEventListener("click", () => applyLook(b.dataset.look === "new")));
 
 function resetCut() {
   const height = Math.min(DEFAULT_CUT_M, bounds.height);

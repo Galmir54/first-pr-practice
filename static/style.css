@@ -1518,3 +1518,12 @@ button.danger-link {
   border: 3px solid #4aa3ff;
   box-shadow: 0 0 14px rgba(74, 163, 255, 0.9), 0 3px 8px rgba(0, 0, 0, 0.45);
 }
+
+/* Neuer Look: ruhigerer, etwas grauerer Hintergrund */
+.stl-viewer-container.look-new {
+  background: radial-gradient(ellipse at 50% 36%, #3d5870 0%, #223a4f 55%, #0e1d2b 100%);
+}
+
+.fp-look {
+  align-items: center;
+}
