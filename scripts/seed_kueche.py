@@ -7,7 +7,7 @@ Zwei Zeilen, die sich gegenüberstehen (alle Maße geschätzt aus Fotos und den 
   Ostwand (x 1,60, Fronten zeigen nach -x), von der Tür nach Norden:
      Hochschrank mit Backofen, Schubladen mit Induktionskochfeld, Dunstabzug, Oberschränke,
      Trockner am Fenster-Ende.
-  Am Fenster (Nordwand): Heizkörper und Mülleimer.
+  Am Fenster (Nordwand): Mülleimer (der Heizkörper steht in scripts/seed_heizkoerper.py).
 Waschmaschine, Trockner und Spülmaschine sind eigene Props mit Shelly-Steckdose (device_id 2/3/4):
 läuft das Gerät, leuchtet die Anzeige, dreht sich die Trommel und liegt ein Lichtschein davor.
 
@@ -138,9 +138,8 @@ for k in range(4):
     za, zb = -2.72 - k * 0.395, -2.72 - (k + 1) * 0.395
     E.box(1.24, 1.25, za - 0.003, zb + 0.003, 1.465, 2.295, "white")
     handle_e(E, (za + zb) / 2, 1.52, 0.26, fx=1.24)
-# Heizkörper unter dem Fenster und Mülleimer (Fotos 3 und 4)
-E.box(0.40, 1.30, -4.90, -4.80, 0.28, 0.86, "white")
-E.box(0.40, 1.30, -4.90, -4.80, 0.86, 0.88, "black")
+# Mülleimer am Fenster (Fotos 3 und 4). Der Heizkörper unter dem Fenster (mit Farbwechsel nach dem
+# Thermostat) kommt aus scripts/seed_heizkoerper.py.
 E.cyl("y", 0.0, 0.42, 0.50, -4.62, 0.17, "gray")
 E.cyl("y", 0.42, 0.46, 0.50, -4.62, 0.18, "ship")
 
