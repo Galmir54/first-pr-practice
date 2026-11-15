@@ -2483,7 +2483,30 @@ function buildProp(p) {
     }
     mesh.position.set(cx, cy, cz);
     group.add(mesh);
-    if (s.anim === "glow") {
+    if (s.anim === "status") {
+      // Leuchtfläche (indirektes Licht unter dem Gerät): rot = läuft, grün = fertig, sonst aus
+      const plateMat = mats.led.clone();
+      plateMat.transparent = true;
+      mesh.material = plateMat;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.visible = false;
+      const haloMat = new THREE.MeshBasicMaterial({
+        map: getHaloTexture(),
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        clippingPlanes: mats.led.clippingPlanes,
+      });
+      const halo = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.08, d + 0.3), haloMat);
+      halo.rotation.x = -Math.PI / 2;
+      halo.position.set(cx, FLOOR_TOP_M + s.y1 + 0.002, cz);
+      halo.renderOrder = 2;
+      halo.visible = false;
+      group.add(halo);
+      anims.push({ type: "status", plate: mesh, plateMat, halo, haloMat, phase: 0 });
+    } else if (s.anim === "glow") {
       anims.push({ type: "glow", mesh, off: material, on: mats.led });
     } else if (s.anim === "show") {
       mesh.visible = false;
@@ -2498,11 +2521,43 @@ let propObjs = []; // pro Prop: { group, anims, on }
 const SPIN_RAD_PER_S = 3.2;
 let lastPropTick = 0;
 
-function applyPropState(obj, on) {
-  if (obj.on === on) return;
+let haloTexture = null;
+// weicher Lichtfleck (Verlauf von der Mitte nach außen) für die Leuchtflächen unter Geräten
+function getHaloTexture() {
+  if (haloTexture) return haloTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const g = canvas.getContext("2d");
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, "rgba(255,255,255,0.9)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.4)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  haloTexture = new THREE.CanvasTexture(canvas);
+  haloTexture.colorSpace = THREE.SRGBColorSpace;
+  return haloTexture;
+}
+
+const STATUS_RUNNING = 0xff2a1f;
+const STATUS_DONE = 0x2dff75;
+
+// runState: "running" | "done" | "idle" aus props[].run.state (für die Farbe der Leuchtfläche)
+function applyPropState(obj, on, runState) {
+  const key = `${on}|${runState || ""}`;
+  if (obj.key === key) return;
+  obj.key = key;
   obj.on = on;
   for (const a of obj.anims) {
-    if (a.type === "glow") a.mesh.material = on ? a.on : a.off;
+    if (a.type === "status") {
+      const color = on ? STATUS_RUNNING : runState === "done" ? STATUS_DONE : null;
+      a.plate.visible = a.halo.visible = color !== null;
+      if (color !== null) {
+        a.plateMat.color.setHex(color);
+        a.haloMat.color.setHex(color);
+        a.plateMat.opacity = a.haloMat.opacity = 0.9;
+      }
+    } else if (a.type === "glow") a.mesh.material = on ? a.on : a.off;
     else if (a.type === "show") a.mesh.visible = on;
     else if (a.type === "slide" && !on) a.node.position[a.axis] = 0;
   }
@@ -2524,6 +2579,12 @@ function tickProps(now) {
         a.phase += dt * a.speed;
         a.node.position[a.axis] = Math.sin(a.phase) * a.amp;
         spinning = true;
+      } else if (a.type === "status") {
+        // läuft: die Leuchtfläche atmet leicht (rot); fertig = ruhiges grünes Licht
+        a.phase += dt * 2.2;
+        a.plateMat.opacity = 0.8 + 0.2 * Math.sin(a.phase);
+        a.haloMat.opacity = 0.65 + 0.35 * Math.sin(a.phase);
+        spinning = true;
       }
     }
   }
@@ -2532,7 +2593,7 @@ function tickProps(now) {
 
 function applyProps() {
   if (!scene || !modelData) return;
-  const signature = JSON.stringify(props.map(({ on, power_w, ...rest }) => rest));
+  const signature = JSON.stringify(props.map(({ on, power_w, run, ...rest }) => rest));
   const changed = signature !== propSignature;
   if (changed) {
     propSignature = signature;
@@ -2548,7 +2609,7 @@ function applyProps() {
       return obj;
     });
   }
-  props.forEach((p, i) => propObjs[i] && applyPropState(propObjs[i], Boolean(p.on)));
+  props.forEach((p, i) => propObjs[i] && applyPropState(propObjs[i], Boolean(p.on), p.run && p.run.state));
   renderRunLabels();
   if (changed) {
     applyModelCutouts();

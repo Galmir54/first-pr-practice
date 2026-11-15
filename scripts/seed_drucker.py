@@ -18,7 +18,9 @@ import urllib.request
 base = sys.argv[1].rstrip("/")
 ON_WATTS = 20  # im Stand zieht die Steckdose ~0 W, ein Druck (Heizbett/Düse) deutlich mehr
 
-TOP = 0.84  # Oberkante des Schreibtischs über dem Boden
+DESK = 0.84  # Oberkante des Schreibtischs über dem Boden
+LIFT = 0.012  # Der Drucker steht auf kleinen Füßen: darunter leuchtet die Statusfläche
+TOP = DESK + LIFT  # Unterkante des Druckers
 X0, X1 = 4.12, 4.52  # Tiefe (Front bei X0, zum Raum)
 Z0, Z1 = -2.15, -1.75
 XC, ZC = (X0 + X1) / 2, (Z0 + Z1) / 2
@@ -31,6 +33,14 @@ def box(x0, x1, z0, z1, y0, y1, mat="black", **kw):
                       y0=round(TOP + y0, 3), y1=round(TOP + y1, 3), mat=mat, **kw))
 
 
+# Statusleuchte unter dem Drucker (indirektes Licht): rot, solange er druckt, grün, wenn er fertig ist.
+# Etwas größer als der Sockel, auf der Schreibtischplatte; dazu vier Füße unter dem Sockel.
+parts.append(dict(x0=round(X0 - 0.045, 3), x1=round(X1 + 0.045, 3), z0=round(Z0 - 0.045, 3), z1=round(Z1 + 0.045, 3),
+                  y0=DESK, y1=round(DESK + 0.004, 3), mat="led", anim="status"))
+for fx in (X0 + 0.02, X1 - 0.05):
+    for fz in (Z0 + 0.02, Z1 - 0.05):
+        parts.append(dict(x0=round(fx, 3), x1=round(fx + 0.03, 3), z0=round(fz, 3), z1=round(fz + 0.03, 3),
+                          y0=DESK, y1=round(TOP, 3), mat="black"))
 # Sockel (Elektronik) und Rahmen
 box(X0, X1, Z0, Z1, 0.0, 0.06)
 box(X0 + 0.02, X1 - 0.02, Z0 + 0.02, Z1 - 0.02, 0.06, 0.075, "gray")

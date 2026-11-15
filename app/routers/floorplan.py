@@ -162,8 +162,9 @@ class Part(BaseModel):
     axis: str = Field(default="x", pattern="^[xyz]$")
     # Verhalten abhängig vom Zustand des Geräts (Prop.device_id): "spin" dreht das Teil um `axis`
     # (Drehpunkt px/py/pz, sonst die Mitte), "slide" fährt es hin und her (entlang `axis`, +-`amp` Meter),
-    # "glow" leuchtet statt seiner Farbe, "show" ist nur sichtbar, wenn das Gerät läuft
-    anim: str = Field(default="none", pattern="^(none|spin|slide|glow|show)$")
+    # "glow" leuchtet statt seiner Farbe, "show" ist nur sichtbar, wenn das Gerät läuft,
+    # "status" ist eine Leuchtfläche mit Lichtschein: rot, solange das Gerät läuft, grün, wenn es fertig ist
+    anim: str = Field(default="none", pattern="^(none|spin|slide|glow|show|status)$")
     amp: float = Field(default=0.05, ge=0, lt=1)  # Hub von "slide" in Metern
     speed: float | None = Field(default=None, gt=0, lt=30)  # rad/s für "spin" und "slide"
     px: float | None = None

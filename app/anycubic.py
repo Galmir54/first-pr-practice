@@ -194,7 +194,7 @@ def _job_from(project: dict) -> dict:
         "in_progress": status in IN_PROGRESS,
         "paused": bool(_int(project.get("pause"), 0)) and status in IN_PROGRESS,
         "progress": progress / 100 if progress is not None and 0 <= progress <= 100 else None,
-        "remaining_s": remain_min * 60 if remain_min else None,  # 0 = noch keine Schätzung (Aufheizen)
+        "remaining_s": remain_min * 60 if remain_min and remain_min > 0 else None,  # 0/-1 = noch keine Schätzung
         "elapsed_s": elapsed_min * 60 if elapsed_min is not None else None,
         "started_at": _int(project.get("start_time")) or _int(project.get("create_time")),
         "ended_at": _int(project.get("end_time")) or None,
