@@ -1064,7 +1064,8 @@ function animate() {
   if (tickOpenings(now)) needsRender = true; // Tür/Fenster in Bewegung
   if (tickProps(now)) needsRender = true; // Trommeln laufender Geräte
   const sceneChanged = moved || needsRender;
-  const weatherMoved = tickWeather(now); // Regen/Schnee: nur die Teilchen bewegen sich, Schatten bleiben
+  // Regen/Schnee und das Schimmern der Statuswolken: nur das bewegt sich, Schatten bleiben
+  const weatherMoved = tickWeather(now) | tickStatus(now);
   if (sceneChanged || weatherMoved) {
     renderer.shadowMap.autoUpdate = sceneChanged;
     renderer.render(scene, camera);
@@ -2484,28 +2485,31 @@ function buildProp(p) {
     mesh.position.set(cx, cy, cz);
     group.add(mesh);
     if (s.anim === "status") {
-      // Leuchtfläche (indirektes Licht unter dem Gerät): rot = läuft, grün = fertig, sonst aus
-      const plateMat = mats.led.clone();
-      plateMat.transparent = true;
-      mesh.material = plateMat;
+      // Leuchtwolke (indirektes Licht unter dem Gerät): rot = läuft, grün = fertig, sonst aus.
+      // Das Teil gibt nur Mitte und Größe vor, es wird selbst nicht gezeichnet. Zwei weiche Wolkenschichten:
+      // eine deckende (kräftige Farbe auch auf hellem Holz) und eine additive (Glanz), die langsam gegeneinander schimmern.
+      mesh.visible = false;
       mesh.castShadow = false;
       mesh.receiveShadow = false;
-      mesh.visible = false;
-      const haloMat = new THREE.MeshBasicMaterial({
-        map: getHaloTexture(),
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        toneMapped: false,
-        clippingPlanes: mats.led.clippingPlanes,
-      });
-      const halo = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.08, d + 0.3), haloMat);
-      halo.rotation.x = -Math.PI / 2;
-      halo.position.set(cx, FLOOR_TOP_M + s.y1 + 0.002, cz);
-      halo.renderOrder = 2;
-      halo.visible = false;
-      group.add(halo);
-      anims.push({ type: "status", plate: mesh, plateMat, halo, haloMat, phase: 0 });
+      const makeLayer = (additive, grow, lift) => {
+        const material = new THREE.MeshBasicMaterial({
+          map: getCloudTexture(),
+          transparent: true,
+          depthWrite: false,
+          blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+          toneMapped: false,
+          clippingPlanes: mats.led.clippingPlanes,
+        });
+        const plane = new THREE.Mesh(new THREE.PlaneGeometry(w + grow[0], d + grow[1]), material);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.set(cx, FLOOR_TOP_M + s.y1 + lift, cz);
+        plane.renderOrder = additive ? 3 : 2;
+        plane.visible = false;
+        group.add(plane);
+        return { plane, material };
+      };
+      const layers = [makeLayer(false, [0.34, 0.6], 0.003), makeLayer(true, [0.55, 1.0], 0.005)];
+      anims.push({ type: "status", layers, phase: Math.random() * 6, active: false, calm: false });
     } else if (s.anim === "glow") {
       anims.push({ type: "glow", mesh, off: material, on: mats.led });
     } else if (s.anim === "show") {
@@ -2521,22 +2525,45 @@ let propObjs = []; // pro Prop: { group, anims, on }
 const SPIN_RAD_PER_S = 3.2;
 let lastPropTick = 0;
 
-let haloTexture = null;
-// weicher Lichtfleck (Verlauf von der Mitte nach außen) für die Leuchtflächen unter Geräten
-function getHaloTexture() {
-  if (haloTexture) return haloTexture;
+let cloudTexture = null;
+// weiche, unregelmäßige Wolke (weiß mit Alpha, wird über die Materialfarbe eingefärbt): dichter Kern, ausgefranste
+// Ränder, die zum Rand hin sicher auf 0 auslaufen (alle Flecken bleiben mit Abstand innerhalb des Bildes)
+function getCloudTexture() {
+  if (cloudTexture) return cloudTexture;
+  const size = 256;
   const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 128;
+  canvas.width = canvas.height = size;
   const g = canvas.getContext("2d");
-  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grad.addColorStop(0, "rgba(255,255,255,0.9)");
-  grad.addColorStop(0.5, "rgba(255,255,255,0.4)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 128, 128);
-  haloTexture = new THREE.CanvasTexture(canvas);
-  haloTexture.colorSpace = THREE.SRGBColorSpace;
-  return haloTexture;
+  let seed = 11;
+  const rnd = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  const blob = (x, y, r, a) => {
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, `rgba(255,255,255,${a})`);
+    grad.addColorStop(0.6, `rgba(255,255,255,${a * 0.45})`);
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+  };
+  // breites, dichtes Plateau (der Kern liegt unter dem Gerät, sichtbar ist vor allem der Rand), dann weich auslaufend
+  const base = g.createRadialGradient(128, 128, 0, 128, 128, 126);
+  base.addColorStop(0, "rgba(255,255,255,1)");
+  base.addColorStop(0.55, "rgba(255,255,255,0.95)");
+  base.addColorStop(0.75, "rgba(255,255,255,0.6)");
+  base.addColorStop(0.9, "rgba(255,255,255,0.22)");
+  base.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = base;
+  g.fillRect(0, 0, size, size);
+  for (let i = 0; i < 18; i++) {
+    const angle = rnd() * Math.PI * 2;
+    const dist = 30 + rnd() * 25; // höchstens ~66 + 52 Radius = 118 < 128: nichts reicht bis zum Bildrand
+    blob(128 + Math.cos(angle) * dist * 1.2, 128 + Math.sin(angle) * dist, 30 + rnd() * 22, 0.2 + rnd() * 0.3);
+  }
+  cloudTexture = new THREE.CanvasTexture(canvas);
+  cloudTexture.colorSpace = THREE.SRGBColorSpace;
+  return cloudTexture;
 }
 
 const STATUS_RUNNING = 0xff2a1f;
@@ -2551,17 +2578,51 @@ function applyPropState(obj, on, runState) {
   for (const a of obj.anims) {
     if (a.type === "status") {
       const color = on ? STATUS_RUNNING : runState === "done" ? STATUS_DONE : null;
-      a.plate.visible = a.halo.visible = color !== null;
-      if (color !== null) {
-        a.plateMat.color.setHex(color);
-        a.haloMat.color.setHex(color);
-        a.plateMat.opacity = a.haloMat.opacity = 0.9;
+      a.active = color !== null;
+      a.calm = !on; // fertig: ruhiges grünes Leuchten, läuft: lebendiges rotes Schimmern
+      for (const layer of a.layers) {
+        layer.plane.visible = a.active;
+        if (color !== null) layer.material.color.setHex(color);
       }
+      if (a.active) shimmerStatus(a);
     } else if (a.type === "glow") a.mesh.material = on ? a.on : a.off;
     else if (a.type === "show") a.mesh.visible = on;
     else if (a.type === "slide" && !on) a.node.position[a.axis] = 0;
   }
   requestRender();
+}
+
+// Schimmern der Leuchtwolke: beide Schichten atmen und driften langsam gegeneinander
+function shimmerStatus(a) {
+  const p = a.phase;
+  const k = a.calm ? 0.35 : 1; // fertig = ruhiger
+  const [body, glow] = a.layers;
+  body.material.opacity = 0.9 - 0.1 * k + 0.1 * k * Math.sin(p * 1.3) + 0.05 * k * Math.sin(p * 3.1 + 1);
+  glow.material.opacity = 0.75 - 0.25 * k + 0.25 * k * Math.sin(p * 0.8 + 2);
+  const breathe = 1 + 0.04 * k * Math.sin(p * 0.9);
+  body.plane.scale.set(breathe, breathe, 1);
+  glow.plane.scale.set(2 - breathe, 2 - breathe, 1);
+  glow.plane.rotation.z = 0.14 * k * Math.sin(p * 0.37);
+  body.plane.rotation.z = -0.08 * k * Math.sin(p * 0.51 + 1);
+}
+
+let lastStatusTick = 0;
+// Schimmern der Statuswolken: ca. 20 Bilder pro Sekunde reichen, Schatten ändern sich dabei nicht.
+// true = es wurde ein Schritt gemacht (neu zeichnen).
+function tickStatus(now) {
+  if (now - lastStatusTick < 50) return false;
+  const dt = Math.min(0.2, (now - lastStatusTick) / 1000);
+  lastStatusTick = now;
+  let moved = false;
+  for (const obj of propObjs) {
+    for (const a of obj.anims) {
+      if (a.type !== "status" || !a.active) continue;
+      a.phase += dt * (a.calm ? 0.8 : 1.6);
+      shimmerStatus(a);
+      moved = true;
+    }
+  }
+  return moved;
 }
 
 // Läuft pro Bild: dreht die Trommeln laufender Geräte. true = es dreht sich etwas (neu zeichnen).
@@ -2578,12 +2639,6 @@ function tickProps(now) {
       } else if (a.type === "slide") {
         a.phase += dt * a.speed;
         a.node.position[a.axis] = Math.sin(a.phase) * a.amp;
-        spinning = true;
-      } else if (a.type === "status") {
-        // läuft: die Leuchtfläche atmet leicht (rot); fertig = ruhiges grünes Licht
-        a.phase += dt * 2.2;
-        a.plateMat.opacity = 0.8 + 0.2 * Math.sin(a.phase);
-        a.haloMat.opacity = 0.65 + 0.35 * Math.sin(a.phase);
         spinning = true;
       }
     }
