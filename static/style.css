@@ -1288,20 +1288,21 @@ button.danger-link {
 /* Hilfe (oben rechts): Fragezeichen-Knopf, der die Legende für Türen/Fenster ein-/ausblendet */
 .fp-help-btn {
   position: absolute;
-  right: 12px;
+  left: 58px; /* direkt rechts neben dem Zahnrad; der Ansichtsrahmen sitzt 8px innerhalb der Karte */
   top: 10px;
   z-index: 4;
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   font-family: var(--font-mono);
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   font-weight: 700;
   line-height: 1;
   color: var(--text-dim);
   background: rgba(8, 18, 27, 0.78);
   border: 1px solid var(--card-border);
-  border-radius: 50%;
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
   cursor: pointer;
 }
 
@@ -1312,13 +1313,15 @@ button.danger-link {
 
 .fp-legend {
   position: absolute;
-  right: 12px;
-  top: 48px;
+  left: 106px; /* rechts neben dem Fragezeichen */
+  top: 10px;
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: calc(100% - 24px);
+  min-height: 40px;
+  box-sizing: border-box;
+  max-width: calc(100% - 132px);
   flex-wrap: wrap;
   padding: 8px 12px;
   font-size: 0.72rem;
