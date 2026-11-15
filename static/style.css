@@ -1617,7 +1617,7 @@ button.danger-link {
 .fp-weather {
   position: absolute;
   right: 12px;
-  top: 48px;
+  top: 10px;
   z-index: 3;
   max-width: calc(100% - 24px);
   padding: 5px 12px;
@@ -1633,7 +1633,7 @@ button.danger-link {
 .fp-heat-btn {
   position: absolute;
   right: 12px;
-  top: 86px;
+  top: 48px;
   z-index: 3;
   padding: 5px 12px;
   font-family: var(--font-mono);
@@ -1655,7 +1655,7 @@ button.danger-link {
 .fp-heat-legend {
   position: absolute;
   right: 12px;
-  top: 124px;
+  top: 86px;
   z-index: 3;
   display: flex;
   align-items: center;
