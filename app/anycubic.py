@@ -11,9 +11,11 @@ sonst alle 5 Minuten. Ohne Token passiert nichts.
 """
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -86,8 +88,35 @@ def has_token() -> bool:
     return bool(token and token.strip())
 
 
+def clean_token(raw: str | None) -> str:
+    """Eingefügten Token bereinigen: Anführungszeichen, "Bearer ", Leerraum und Zeilenumbrüche (auch mitten drin)."""
+    token = (raw or "").strip()
+    token = re.sub(r"^(?:bearer|xx-token)\s*[:=]?\s*", "", token, flags=re.I)
+    return re.sub(r"[\s'\"`]+", "", token)
+
+
+def describe_token(token: str) -> str:
+    """Kurze Auskunft über die Form des Tokens (ohne ihn preiszugeben), um falsches Kopieren zu erkennen."""
+    parts = token.split(".")
+    if len(parts) != 3 or not all(parts):
+        return f"Der eingetragene Text ({len(token)} Zeichen) ist kein vollständiger Token (erwartet: drei Teile mit Punkten, ca. 300-400 Zeichen) - bitte komplett neu kopieren"
+    info = f"{len(token)} Zeichen"
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload))
+        exp = data.get("exp")
+        if isinstance(exp, (int, float)):
+            when = time.strftime("%d.%m.%Y %H:%M", time.localtime(exp))
+            if exp < time.time():
+                return f"Token ist abgelaufen (seit {when}) - neu holen"
+            info += f", gültig bis {when}"
+    except Exception:
+        pass
+    return f"Token sieht vollständig aus ({info}), die Cloud lehnt ihn trotzdem ab - nach neuem Login auf der Webseite alten Token verworfen? Neu holen und sofort eintragen"
+
+
 def set_token(token: str | None) -> None:
-    token = (token or "").strip().strip("'\"")
+    token = clean_token(token)
     _save(TOKEN_KEY, token or None)
     state.update(status="not_configured" if not token else "error", message="" if not token else "noch nicht geprüft",
                  printers=[], job=None, job_at=0.0)
@@ -176,7 +205,7 @@ def _job_from(project: dict) -> dict:
 async def refresh() -> None:
     """Eine Abfrage: Druckerliste und neuester Auftrag des gewählten Druckers."""
     token = await asyncio.to_thread(_load, TOKEN_KEY)
-    token = (token or "").strip()
+    token = clean_token(token)
     if not token:
         state.update(status="not_configured", message="", printers=[], job=None)
         return
@@ -213,8 +242,7 @@ async def refresh() -> None:
                         job = _job_from(project)
                         break
     except TokenInvalid:
-        state.update(status="token_invalid", message="Token ungültig oder abgelaufen - bitte neu eintragen",
-                     checked_at=time.time(), job=None)
+        state.update(status="token_invalid", message=describe_token(token), checked_at=time.time(), job=None)
         return
     except Exception as exc:
         logger.warning("Anycubic-Abfrage fehlgeschlagen: %s", exc)
