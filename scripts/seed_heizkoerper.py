@@ -1,4 +1,4 @@
-"""Heizkörper (Kinderzimmer, Küche, Arbeitszimmer) als Props mit Farbwechsel nach dem Raum-Thermostat.
+"""Heizkörper (Kinderzimmer, Küche, Arbeitszimmer, Bad) als Props mit Farbwechsel nach dem Raum-Thermostat.
 
 Doppelplatten-Heizkörper mit Konvektorgitter oben, Sicken in der Front und Thermostatkopf rechts. Die Platten haben
 die Animation "heat": rötlich, wenn der Thermostat des Raums (Prop.heat_room) gerade heizt (Ally work_state Heat),
@@ -17,34 +17,43 @@ import urllib.request
 base = sys.argv[1].rstrip("/")
 
 
-def radiator(pid, name, heat_room, xc, half, z_wall, y0, y1):
-    """Heizkörper mit Rückseite an der Wand (z_wall = Innenseite der Nordwand), Front zeigt nach +z."""
+def radiator(pid, name, heat_room, xc, half, z_wall, y0, y1, dirz=1, head=1):
+    """Heizkörper mit Rückseite an der Wand (z_wall = Innenseite der Wand). dirz +1: Wand im Norden, Front zeigt nach +z;
+    dirz -1: Wand im Süden, Front zeigt nach -z. head +1/-1: Thermostatkopf an der rechten (+x) / linken (-x) Seite."""
     parts = []
     x0, x1 = xc - half, xc + half
     top = y1 - 0.015  # darüber das Konvektorgitter
 
-    def box(a0, a1, b0, b1, c0, c1, mat="white", **kw):
-        parts.append(dict(x0=round(a0, 3), x1=round(a1, 3), z0=round(b0, 3), z1=round(b1, 3),
+    def zz(offset):  # Abstand von der Wand -> z
+        return z_wall + dirz * offset
+
+    def box(a0, a1, d0, d1, c0, c1, mat="white", **kw):
+        """x von a0..a1, Abstand von der Wand d0..d1, Höhe c0..c1."""
+        za, zb = sorted((zz(d0), zz(d1)))
+        parts.append(dict(x0=round(a0, 3), x1=round(a1, 3), z0=round(za, 3), z1=round(zb, 3),
                           y0=round(c0, 3), y1=round(c1, 3), mat=mat, **kw))
 
     # zwei Platten hintereinander, dazwischen ein dunkler Spalt
-    box(x0, x1, z_wall + 0.012, z_wall + 0.040, y0, top, "gray", anim="heat")
-    box(x0 + 0.01, x1 - 0.01, z_wall + 0.040, z_wall + 0.048, y0 + 0.02, top - 0.02, "black")
-    box(x0, x1, z_wall + 0.048, z_wall + 0.076, y0, top, "gray", anim="heat")
+    box(x0, x1, 0.012, 0.040, y0, top, "gray", anim="heat")
+    box(x0 + 0.01, x1 - 0.01, 0.040, 0.048, y0 + 0.02, top - 0.02, "black")
+    box(x0, x1, 0.048, 0.076, y0, top, "gray", anim="heat")
     # Konvektorgitter oben, Seitenblenden
-    box(x0 + 0.005, x1 - 0.005, z_wall + 0.012, z_wall + 0.078, top, y1, "black")
+    box(x0 + 0.005, x1 - 0.005, 0.012, 0.078, top, y1, "black")
     for sx in (x0 - 0.008, x1):
-        box(sx, sx + 0.008, z_wall + 0.012, z_wall + 0.078, y0 + 0.005, y1 - 0.005, "white")
+        box(sx, sx + 0.008, 0.012, 0.078, y0 + 0.005, y1 - 0.005, "white")
     # senkrechte Sicken in der Frontplatte
     n = 6
     for k in range(1, n):
         x = x0 + (x1 - x0) * k / n
-        box(x - 0.003, x + 0.003, z_wall + 0.076, z_wall + 0.079, y0 + 0.03, top - 0.03, "black")
-    # Thermostatkopf rechts (Ally) mit Ventil darunter
+        box(x - 0.003, x + 0.003, 0.076, 0.079, y0 + 0.03, top - 0.03, "black")
+    # Thermostatkopf (Ally) mit Ventil darunter, an der Seite `head`
     mid = y0 + (top - y0) * 0.55
-    parts.append(dict(x0=round(x1, 3), x1=round(x1 + 0.085, 3), z0=round(z_wall + 0.02, 3), z1=round(z_wall + 0.07, 3),
+    hx0, hx1 = (x1, x1 + 0.085) if head > 0 else (x0 - 0.085, x0)
+    vx0, vx1 = (x1, x1 + 0.02) if head > 0 else (x0 - 0.02, x0)
+    za, zb = sorted((zz(0.02), zz(0.07)))
+    parts.append(dict(x0=round(hx0, 3), x1=round(hx1, 3), z0=round(za, 3), z1=round(zb, 3),
                       y0=round(mid - 0.025, 3), y1=round(mid + 0.025, 3), mat="white", shape="cyl", axis="x"))
-    box(x1, x1 + 0.02, z_wall + 0.035, z_wall + 0.055, y0 + 0.05, mid - 0.025, "chrome")
+    box(vx0, vx1, 0.035, 0.055, y0 + 0.05, mid - 0.025, "chrome")
     return dict(id=pid, name=name, parts=parts, heat_room=heat_room)
 
 
@@ -54,6 +63,9 @@ props = [
     # Arbeitszimmer: an der Nordwand links neben der Tür nach draußen "t3" (Tür x 2,95..3,68; Wand-Innenseite z -3,84,
     # Westwand-Innenseite x 2,10): 60 cm breit, ca. 10 cm Abstand zur Tür. Breite/Höhe geschätzt.
     radiator("arbeitszimmer_heizkoerper", "Heizkörper Arbeitszimmer", "Arbeitszimmer", 2.55, 0.30, -3.84, 0.14, 0.74),
+    # Bad: an der Südwand östlich (links, wenn man zur Tür schaut) der Tür zum Flur "t4" (Tür x -2,07..-1,48; Wand-Innenseite
+    # z -2,15; Ostwand-Innenseite x -0,545): 60 cm breit, Thermostatkopf zur Tür hin (ca. 6 cm bis zur Türkante).
+    radiator("bad_heizkoerper", "Heizkörper Bad", "Bad", -1.03, 0.30, -2.15, 0.14, 0.74, dirz=-1, head=-1),
 ]
 OWN = {p["id"] for p in props}
 
