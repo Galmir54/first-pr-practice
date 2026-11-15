@@ -1,4 +1,4 @@
-"""Heizkörper (Kinderzimmer, Küche, Arbeitszimmer, Bad) als Props mit Farbwechsel nach dem Raum-Thermostat.
+"""Heizkörper (Kinderzimmer, Küche, Arbeitszimmer, Bad, Schlafzimmer, Wohnzimmer) als Props mit Farbwechsel nach dem Raum-Thermostat.
 
 Doppelplatten-Heizkörper mit Konvektorgitter oben, Sicken in der Front und Thermostatkopf rechts. Die Platten haben
 die Animation "heat": rötlich, wenn der Thermostat des Raums (Prop.heat_room) gerade heizt (Ally work_state Heat),
@@ -66,6 +66,10 @@ props = [
     # Bad: an der Südwand östlich (links, wenn man zur Tür schaut) der Tür zum Flur "t4" (Tür x -2,07..-1,48; Wand-Innenseite
     # z -2,15; Ostwand-Innenseite x -0,545): 60 cm breit, Thermostatkopf zur Tür hin (ca. 6 cm bis zur Türkante).
     radiator("bad_heizkoerper", "Heizkörper Bad", "Bad", -1.03, 0.30, -2.15, 0.14, 0.74, dirz=-1, head=-1),
+    # Schlafzimmer und Wohnzimmer: je unter dem Fenster an der Südwand (Wand-Innenseite z 5,095; Fenster f5 x -0,12 /
+    # f6 x 3,02, Brüstung 1,05 / 1,01 m, Breite 1,77 / 1,83 m): 1,20 m breit, Front zeigt nach -z. Maße geschätzt.
+    radiator("schlafzimmer_heizkoerper", "Heizkörper Schlafzimmer", "Schlafzimmer", -0.12, 0.60, 5.095, 0.14, 0.74, dirz=-1),
+    radiator("wohnzimmer_heizkoerper", "Heizkörper Wohnzimmer", "Wohnzimmer", 3.02, 0.60, 5.095, 0.14, 0.74, dirz=-1),
 ]
 OWN = {p["id"] for p in props}
 
