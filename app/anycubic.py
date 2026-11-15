@@ -99,7 +99,8 @@ def describe_token(token: str) -> str:
     """Kurze Auskunft über die Form des Tokens (ohne ihn preiszugeben), um falsches Kopieren zu erkennen."""
     parts = token.split(".")
     if len(parts) != 3 or not all(parts):
-        return f"Der eingetragene Text ({len(token)} Zeichen) ist kein vollständiger Token (erwartet: drei Teile mit Punkten, ca. 300-400 Zeichen) - bitte komplett neu kopieren"
+        return (f"Die Cloud lehnt den eingetragenen Text ({len(token)} Zeichen, kein JWT) ab - "
+                "vermutlich der falsche Wert aus dem Browser; bitte neu holen")
     info = f"{len(token)} Zeichen"
     try:
         payload = parts[1] + "=" * (-len(parts[1]) % 4)
