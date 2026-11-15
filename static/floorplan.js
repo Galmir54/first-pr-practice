@@ -2469,7 +2469,16 @@ function buildProp(p) {
       mesh.position.set(cx - px, cy - py, cz - pz);
       pivot.add(mesh);
       group.add(pivot);
-      anims.push({ type: "spin", node: pivot, axis: s.axis || "x" });
+      anims.push({ type: "spin", node: pivot, axis: s.axis || "x", speed: s.speed || SPIN_RAD_PER_S });
+      continue;
+    }
+    if (s.anim === "slide") {
+      // fährt hin und her, solange das Gerät läuft (z.B. Druckkopf und Druckbett)
+      const wrap = new THREE.Group();
+      mesh.position.set(cx, cy, cz);
+      wrap.add(mesh);
+      group.add(wrap);
+      anims.push({ type: "slide", node: wrap, axis: s.axis || "x", amp: s.amp ?? 0.05, speed: s.speed || 3, phase: 0 }); // alle Teile gleich getaktet: Kopf, Düse und Lüfter bleiben zusammen
       continue;
     }
     mesh.position.set(cx, cy, cz);
@@ -2495,6 +2504,7 @@ function applyPropState(obj, on) {
   for (const a of obj.anims) {
     if (a.type === "glow") a.mesh.material = on ? a.on : a.off;
     else if (a.type === "show") a.mesh.visible = on;
+    else if (a.type === "slide" && !on) a.node.position[a.axis] = 0;
   }
   requestRender();
 }
@@ -2507,9 +2517,14 @@ function tickProps(now) {
   for (const obj of propObjs) {
     if (!obj.on) continue;
     for (const a of obj.anims) {
-      if (a.type !== "spin") continue;
-      a.node.rotation[a.axis] += dt * SPIN_RAD_PER_S;
-      spinning = true;
+      if (a.type === "spin") {
+        a.node.rotation[a.axis] += dt * a.speed;
+        spinning = true;
+      } else if (a.type === "slide") {
+        a.phase += dt * a.speed;
+        a.node.position[a.axis] = Math.sin(a.phase) * a.amp;
+        spinning = true;
+      }
     }
   }
   return spinning;
@@ -3496,6 +3511,7 @@ function runLabelContent(p) {
         : `läuft seit ${fmtDuration(run.elapsed_s)}`;
   let sub;
   if (run.remaining_s != null) sub = `fertig ca. ${fmtClock(run.finish_at)}${run.confidence === "grob" ? " (grob)" : ""}`;
+  else if (run.estimate === false) sub = `seit ${fmtClock(run.started_at)} · ${(run.energy_wh / 1000).toFixed(2).replace(".", ",")} kWh`;
   else if (run.runs_known < 3) sub = "lernt die Dauer noch";
   else sub = `seit ${fmtClock(run.started_at)}`;
   return { cls: "running", title: p.name, text, sub, progress: run.progress };
@@ -3576,8 +3592,9 @@ function updateRunPositions() {
     if (item.el.style.display === "none") continue;
     const ew = item.el.offsetWidth;
     const eh = item.el.offsetHeight;
-    const cx = parseFloat(item.el.style.left);
-    const cy = parseFloat(item.el.style.top);
+    // am Rand der Ansicht ganz im Bild halten (sonst wird das Schild abgeschnitten)
+    const cx = Math.min(Math.max(parseFloat(item.el.style.left), ew / 2 + 6), w - ew / 2 - 6);
+    const cy = Math.min(Math.max(parseFloat(item.el.style.top), eh + 6), h - 6);
     let best = null;
     for (const fy of [0, -1, 1, -2, 2]) {
       for (const fx of [0, -1, 1, -2, 2]) {
@@ -3585,6 +3602,7 @@ function updateRunPositions() {
         const dy = fy * (eh + 4);
         const rect = { l: cx - ew / 2 + dx, t: cy - eh + dy, r: cx + ew / 2 + dx, b: cy + dy };
         let cost = Math.hypot(dx, dy) * 0.5;
+        if (rect.l < 4 || rect.r > w - 4 || rect.t < 4 || rect.b > h - 4) cost += 1e6;
         for (const o of obstacles) cost += overlapArea(rect, o) * 0.6;
         for (const o of placed) cost += overlapArea(rect, o) * 3;
         if (!best || cost < best.cost) best = { cost, dx, dy, rect };

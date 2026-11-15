@@ -206,6 +206,6 @@ def req(method, url, body=None):
 
 mine = {p["id"] for p in props}
 existing = req("GET", base + "/api/floorplan/props")["props"]
-keep = [{k: v for k, v in p.items() if k not in ("on", "power_w")} for p in existing if p["id"] not in mine]
+keep = [{k: v for k, v in p.items() if k not in ("on", "power_w", "run")} for p in existing if p["id"] not in mine]
 out = req("PUT", base + "/api/floorplan/props", {"props": keep + props})
 print({p["id"]: len(p["parts"]) for p in out["props"]})

@@ -28,7 +28,7 @@ CURRENT_LOOKBACK_H = 36
 
 _lock = threading.Lock()
 _history_cache: dict[int, tuple[float, list[dict]]] = {}
-_state_cache: dict[tuple[int, float], tuple[float, dict]] = {}
+_state_cache: dict[tuple[int, float, bool], tuple[float, dict]] = {}
 
 
 def _epoch(ts: str) -> float | None:
@@ -137,21 +137,21 @@ def estimate_remaining(elapsed_s: float, energy_so_far: float, history: list[dic
     }
 
 
-def run_state(device_id: int, on_watts: float = 8.0, name: str = "") -> dict:
+def run_state(device_id: int, on_watts: float = 8.0, estimate: bool = True) -> dict:
     """Aktueller Zustand des Geräts: idle | running | done (mit Laufzeit, Restzeit, Verbrauch)."""
-    key = (device_id, float(on_watts))
+    key = (device_id, float(on_watts), estimate)
     mono = time.monotonic()
     with _lock:
         cached = _state_cache.get(key)
     if cached and mono - cached[0] < STATE_TTL_S:
         return cached[1]
-    state = _compute_state(device_id, float(on_watts))
+    state = _compute_state(device_id, float(on_watts), estimate)
     with _lock:
         _state_cache[key] = (mono, state)
     return state
 
 
-def _compute_state(device_id: int, on_watts: float) -> dict:
+def _compute_state(device_id: int, on_watts: float, estimate: bool = True) -> dict:
     now = time.time()
     rows = _load_rows(device_id, datetime.now() - timedelta(hours=CURRENT_LOOKBACK_H))
     reading = poller.latest.get(device_id)
@@ -183,6 +183,9 @@ def _compute_state(device_id: int, on_watts: float) -> dict:
             "confidence": None,
             "runs_known": 0,
         }
+        if not estimate:
+            out["estimate"] = False
+            return out
         history = _history(device_id, on_watts, last["start"])
         out["runs_known"] = len(history)
         est = estimate_remaining(elapsed, last["energy_wh"], history)

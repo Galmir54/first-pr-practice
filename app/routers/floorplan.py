@@ -161,9 +161,11 @@ class Part(BaseModel):
     shape: str = Field(default="box", pattern="^(box|cyl)$")
     axis: str = Field(default="x", pattern="^[xyz]$")
     # Verhalten abhängig vom Zustand des Geräts (Prop.device_id): "spin" dreht das Teil um `axis`
-    # (Drehpunkt px/py/pz, sonst die Mitte), "glow" leuchtet statt seiner Farbe, "show" ist nur sichtbar,
-    # wenn das Gerät läuft
-    anim: str = Field(default="none", pattern="^(none|spin|glow|show)$")
+    # (Drehpunkt px/py/pz, sonst die Mitte), "slide" fährt es hin und her (entlang `axis`, +-`amp` Meter),
+    # "glow" leuchtet statt seiner Farbe, "show" ist nur sichtbar, wenn das Gerät läuft
+    anim: str = Field(default="none", pattern="^(none|spin|slide|glow|show)$")
+    amp: float = Field(default=0.05, ge=0, lt=1)  # Hub von "slide" in Metern
+    speed: float | None = Field(default=None, gt=0, lt=30)  # rad/s für "spin" und "slide"
     px: float | None = None
     py: float | None = None
     pz: float | None = None
@@ -187,6 +189,8 @@ class Prop(BaseModel):
     # Shelly-Steckdose des Geräts: ab `on_watts` läuft es (Teile mit anim "spin"/"glow"/"show" reagieren)
     device_id: int | None = None
     on_watts: float = Field(default=8, gt=0, lt=5000)
+    # False: keine Restzeit-Schätzung (z.B. 3D-Drucker, jeder Druck dauert anders), nur "läuft seit"
+    estimate: bool = True
 
 
 class PropsIn(BaseModel):
@@ -318,7 +322,7 @@ def _prop_state(prop: dict) -> dict:
         out["on"] = out["power_w"] >= float(prop.get("on_watts", 8))
     if device_id is not None:
         # Programmlauf aus dem Stromverlauf (Restlaufzeit); nur für Geräte mit eigener Steckdose
-        out["run"] = runs.run_state(device_id, float(prop.get("on_watts", 8)))
+        out["run"] = runs.run_state(device_id, float(prop.get("on_watts", 8)), bool(prop.get("estimate", True)))
     return out
 
 
