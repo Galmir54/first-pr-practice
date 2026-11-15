@@ -896,13 +896,14 @@ function loadModel() {
       cutSlider.max = String(bounds.height.toFixed(2));
       resetCut();
       applyLook(lookNew, false);
+      renderHeatMap();
 
       setView("top");
       toolbar.classList.remove("hidden");
       setHint(null);
 
       // Zugriff für spätere Erweiterungen (Marker für Lampen/Steckdosen/Temperatur) und zum Testen.
-      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture, get decor() { return decorGroup; }, get propObjs() { return propObjs; }, applyPropState };
+      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture, get decor() { return decorGroup; }, get propObjs() { return propObjs; }, applyPropState, applySky, setTimeMode, setWeatherMode, setHeat, get skyState() { return skyState; } };
     },
     undefined,
     () => {
@@ -983,6 +984,7 @@ function applyLook(isNew, remember = true) {
     floorMaterials.tile.roughness = isNew ? 0.5 : 0.35;
     floorMaterials.wood.aoMapIntensity = floorMaterials.tile.aoMapIntensity = isNew ? 1 : 0;
   }
+  applySky(); // Sonne/Licht je nach Tageszeit und Wetter auf Basis der gewählten Intensitäten
   // Umgebungslicht ändert die Shader: Materialien neu übersetzen lassen
   scene.traverse((o) => {
     const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
@@ -1061,7 +1063,10 @@ function animate() {
   const now = performance.now();
   if (tickOpenings(now)) needsRender = true; // Tür/Fenster in Bewegung
   if (tickProps(now)) needsRender = true; // Trommeln laufender Geräte
-  if (moved || needsRender) {
+  const sceneChanged = moved || needsRender;
+  const weatherMoved = tickWeather(now); // Regen/Schnee: nur die Teilchen bewegen sich, Schatten bleiben
+  if (sceneChanged || weatherMoved) {
+    renderer.shadowMap.autoUpdate = sceneChanged;
     renderer.render(scene, camera);
     needsRender = false;
     updateLabelPositions();
@@ -1180,6 +1185,7 @@ function renderLabels() {
   });
   updateLabelPositions();
   renderGlows();
+  renderHeatMap();
   applyFloorTypes();
   scheduleDecor();
 }
@@ -1203,6 +1209,7 @@ function updateLabelPositions() {
     if (t.mount === "wall") placeOverlay(el, t.wall_x, FLOOR_TOP_M + t.y_bottom + t.tv_height + 0.2, t.wall_z, w, h);
     else placeOverlay(el, (t.x_front + t.x_back) / 2, t.top + t.tv_gap + t.tv_height + 0.2, t.tv_z, w, h);
   });
+  updateRunPositions();
   const cutY = clipPlane ? clipPlane.constant : 10;
   badgeEls.forEach((el, i) => {
     const o = openings[i];
@@ -2527,6 +2534,7 @@ function applyProps() {
     });
   }
   props.forEach((p, i) => propObjs[i] && applyPropState(propObjs[i], Boolean(p.on)));
+  renderRunLabels();
   if (changed) {
     applyModelCutouts();
     scheduleDecor();
@@ -3018,6 +3026,589 @@ function scheduleDecor() {
   }, 120);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Tag/Nacht, Wetter, Hitzekarte und Restlaufzeit der Maschinen
+//
+//  - Der Sonnenstand wird aus Uhrzeit und Ort berechnet (Plan-Norden = oben im Bild). Schattenrichtung,
+//    Lichtfarbe und ein Farbfilter über der Szene folgen ihm: Morgen-/Abendrot, blaue Nacht.
+//    Die Sonnenhöhe wird für die Schatten etwas "aufgerichtet", sonst läge im Winter der halbe
+//    Grundriss im Schatten der Wände.
+//  - Das Wetter kommt vom Server (/api/floorplan/weather, alle 15 min neu): Bewölkung dämpft die Sonne,
+//    Regen/Schnee fallen als Teilchen, Nebel legt einen Schleier darüber, bei Gewitter blitzt es.
+//    Im Zahnrad lassen sich Tageszeit und Wetter zum Ausprobieren überschreiben.
+//  - Die Hitzekarte färbt jeden Raum nach seiner Ally-Temperatur.
+//  - Maschinen mit Shelly-Steckdose zeigen die geschätzte Restlaufzeit (Server: app/runs.py).
+// ---------------------------------------------------------------------------------------------
+const RAD = Math.PI / 180;
+const WEATHER_POLL_MS = 10 * 60 * 1000;
+const SKY_TICK_MS = 60 * 1000;
+const DEFAULT_LATLON = [50.0, 8.3];
+
+function lsGet(key, fallback) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function lsSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* gilt dann nur bis zum Neuladen */
+  }
+}
+
+// Sonnenstand nach dem bekannten SunCalc-Verfahren: Azimut ab Norden im Uhrzeigersinn, Höhe in Grad
+function sunPosition(date, lat, lon) {
+  const e = RAD * 23.4397;
+  const d = date.getTime() / 86400000 - 0.5 + 2440588 - 2451545;
+  const M = RAD * (357.5291 + 0.98560028 * d);
+  const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + RAD * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+  const H = RAD * (280.16 + 360.9856235 * d) - RAD * -lon - ra;
+  const phi = RAD * lat;
+  const altitude = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
+  const azimuthFromSouth = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi));
+  return { altitude: altitude / RAD, azimuth: azimuthFromSouth + Math.PI };
+}
+
+const smoothstep = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+const lerp = (a, b, t) => a + (b - a) * t;
+
+let weatherData = null; // letzte Serverantwort
+let timeMode = lsGet("fp.time", "auto"); // auto | morning | noon | evening | night
+let weatherMode = lsGet("fp.weather", "auto"); // auto | off | clear | cloudy | rain | snow | thunder | fog
+let heatOn = lsGet("fp.heat", "0") === "1";
+let skyTimer = null;
+let weatherTimer = null;
+
+const tintEl = document.createElement("div");
+tintEl.className = "fp-tint";
+const fogEl = document.createElement("div");
+fogEl.className = "fp-fog";
+const flashEl = document.createElement("div");
+flashEl.className = "fp-flash";
+const weatherBadge = document.createElement("div");
+weatherBadge.className = "fp-weather";
+const heatButton = document.createElement("button");
+heatButton.className = "fp-heat-btn";
+heatButton.textContent = "🌡 Hitzekarte";
+heatButton.title = "Räume nach Temperatur einfärben";
+const heatLegend = document.createElement("div");
+heatLegend.className = "fp-heat-legend hidden";
+heatLegend.innerHTML = "<span>15°</span><i></i><span>27°</span>";
+container.append(tintEl, fogEl, flashEl, weatherBadge, heatButton, heatLegend);
+
+function latLon() {
+  return weatherData && typeof weatherData.lat === "number" ? [weatherData.lat, weatherData.lon] : DEFAULT_LATLON;
+}
+
+// Zeitpunkte des heutigen Tages (Sonnenaufgang/-untergang, Mittag) für die Test-Knöpfe
+let solarCache = { key: "", times: null };
+function solarTimes() {
+  const [lat, lon] = latLon();
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  const key = `${base.getTime()}|${lat}|${lon}`;
+  if (solarCache.key === key) return solarCache.times;
+  let rise = null;
+  let set = null;
+  let noon = { alt: -90, t: base.getTime() + 12 * 3600000 };
+  let prev = sunPosition(base, lat, lon).altitude;
+  for (let m = 5; m <= 1440; m += 5) {
+    const t = base.getTime() + m * 60000;
+    const alt = sunPosition(new Date(t), lat, lon).altitude;
+    if (prev < 0 && alt >= 0 && rise === null) rise = t;
+    if (prev >= 0 && alt < 0) set = t;
+    if (alt > noon.alt) noon = { alt, t };
+    prev = alt;
+  }
+  const times = {
+    morning: (rise ?? base.getTime() + 7 * 3600000) + 60 * 60000,
+    noon: noon.t,
+    evening: (set ?? base.getTime() + 18 * 3600000) - 25 * 60000,
+    night: base.getTime() + 23.5 * 3600000,
+  };
+  solarCache = { key, times };
+  return times;
+}
+
+function skyDate() {
+  if (timeMode === "auto") return new Date();
+  const t = solarTimes()[timeMode];
+  return t ? new Date(t) : new Date();
+}
+
+const CLOUD_BY_KIND = { clear: 5, partly: 40, cloudy: 90, rain: 95, snow: 95, thunder: 100, fog: 100 };
+const WEATHER_LABELS = { clear: "Klar", cloudy: "Bedeckt", rain: "Regen", snow: "Schnee", thunder: "Gewitter", fog: "Nebel" };
+const WEATHER_ICONS = { clear: "☀️", partly: "⛅", cloudy: "☁️", rain: "🌧", snow: "🌨", thunder: "⛈", fog: "🌫" };
+
+// Wetter, das gerade dargestellt wird (echt oder per Zahnrad überschrieben); null = keine Effekte
+function effectiveWeather() {
+  if (weatherMode === "off") return null;
+  if (weatherMode !== "auto") {
+    return {
+      kind: weatherMode,
+      label: WEATHER_LABELS[weatherMode],
+      cloud: CLOUD_BY_KIND[weatherMode],
+      temp_c: weatherData && weatherData.ok ? weatherData.temp_c : null,
+      simulated: true,
+    };
+  }
+  return weatherData && weatherData.ok ? weatherData : null;
+}
+
+let skyState = { day: 1, warm: 0, altitude: 30, date: new Date(), cloud: 0 };
+
+function applySky() {
+  if (!scene) return;
+  const { fill, sun } = scene.userData;
+  const [lat, lon] = latLon();
+  const date = skyDate();
+  const pos = sunPosition(date, lat, lon);
+  const wx = effectiveWeather();
+  const cloud = wx ? Math.min(1, (wx.cloud ?? 0) / 100) : 0;
+  const day = smoothstep(-5, 7, pos.altitude); // 0 = Nacht, 1 = Tag
+  const warm = Math.exp(-(((pos.altitude - 2) / 6) ** 2)) * smoothstep(-6, 0, pos.altitude); // Morgen-/Abendrot
+  skyState = { day, warm, altitude: pos.altitude, date, cloud };
+
+  // Sonne: Richtung nach Himmelsrichtung (Norden = -z), Höhe für die Schatten aufgerichtet
+  const alt = Math.min(60, Math.max(0, pos.altitude));
+  const visAlt = (30 + alt * 0.5) * RAD;
+  const dir = new THREE.Vector3(Math.sin(pos.azimuth) * Math.cos(visAlt), Math.sin(visAlt), -Math.cos(pos.azimuth) * Math.cos(visAlt));
+  sun.position.copy(dir.multiplyScalar(20));
+  sun.color.setRGB(1, lerp(0.945, 0.6, warm), lerp(0.87, 0.34, warm));
+  const baseSun = lookNew ? 1.25 : 1.35;
+  sun.intensity = baseSun * day * (1 - 0.8 * cloud);
+  sun.castShadow = sun.intensity > 0.05;
+  // bei Bewölkung kommt das Licht weicher aus allen Richtungen
+  fill.intensity = (lookNew ? 0.3 : 0.7) * (1 + 0.4 * cloud);
+
+  // Farbfilter über der Szene (multipliziert): Nacht bläulich, Dämmerung warm, Wolken grau
+  const night = [0.42, 0.5, 0.72];
+  const dusk = [1, 0.8, 0.66];
+  const rgb = [0, 1, 2].map((i) => {
+    let v = lerp(night[i], 1, day);
+    v *= lerp(1, dusk[i], warm * 0.75);
+    v *= lerp(1, 0.84, cloud * day);
+    return Math.round(255 * Math.min(1, v));
+  });
+  tintEl.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+
+  const kind = wx ? wx.kind : null;
+  fogEl.style.opacity = kind === "fog" ? String(lerp(0.3, 1, day)) : kind === "cloudy" ? "0.18" : "0";
+  renderWeatherBadge(wx, pos);
+  setupWeatherParticles(kind);
+  requestRender();
+}
+
+function renderWeatherBadge(wx, pos) {
+  const phase = skyState.day < 0.15 ? "🌙" : skyState.warm > 0.35 ? "🌅" : "☀️";
+  const parts = [];
+  if (wx) {
+    parts.push(`${WEATHER_ICONS[wx.kind] || ""} ${wx.label}`);
+    if (typeof wx.temp_c === "number") parts.push(`${fmt(wx.temp_c)} °C`);
+  } else if (weatherMode === "off") {
+    parts.push("Wetter aus");
+  } else {
+    parts.push("Wetter nicht verfügbar");
+  }
+  const clock = skyState.date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const simulated = (wx && wx.simulated) || timeMode !== "auto";
+  weatherBadge.textContent = `${phase} ${clock}  ·  ${parts.join("  ·  ")}${simulated ? "  (Test)" : ""}`;
+  weatherBadge.title = pos ? `Sonnenhöhe ${Math.round(pos.altitude)}°` : "";
+}
+
+// ---- Regen / Schnee ----
+let weatherGroup = null;
+let precip = null; // { type, obj, items, halfX, halfZ, last }
+const PRECIP_TOP_M = 7;
+
+function disposePrecip() {
+  if (!precip) return;
+  weatherGroup.remove(precip.obj);
+  precip.obj.geometry.dispose();
+  precip.obj.material.dispose();
+  precip = null;
+}
+
+function setupWeatherParticles(kind) {
+  if (!scene || !bounds) return;
+  const type = kind === "rain" || kind === "thunder" ? "rain" : kind === "snow" ? "snow" : null;
+  if (!weatherGroup) {
+    weatherGroup = new THREE.Group();
+    scene.add(weatherGroup);
+  }
+  if (precip && precip.type === type) return;
+  disposePrecip();
+  if (!type) return;
+  const halfX = bounds.size.x / 2 + 1.6;
+  const halfZ = bounds.size.z / 2 + 1.6;
+  const count = type === "rain" ? 1000 : 600;
+  const items = [];
+  for (let i = 0; i < count; i++) {
+    items.push({
+      x: (Math.random() * 2 - 1) * halfX,
+      y: Math.random() * PRECIP_TOP_M,
+      z: (Math.random() * 2 - 1) * halfZ,
+      v: type === "rain" ? 9 + Math.random() * 4 : 0.6 + Math.random() * 0.5,
+      ph: Math.random() * 6.28,
+    });
+  }
+  const geometry = new THREE.BufferGeometry();
+  let obj;
+  if (type === "rain") {
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 6), 3));
+    obj = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.6, depthWrite: false, toneMapped: false })
+    );
+  } else {
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    obj = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({ map: getGlowTexture(), color: 0xffffff, size: 0.22, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false })
+    );
+  }
+  obj.frustumCulled = false;
+  obj.renderOrder = 20;
+  weatherGroup.add(obj);
+  precip = { type, obj, items, halfX, halfZ, last: 0 };
+  writePrecip(0);
+}
+
+function writePrecip(dt) {
+  const { type, obj, items, halfX, halfZ } = precip;
+  const pos = obj.geometry.getAttribute("position");
+  const arr = pos.array;
+  const windX = type === "rain" ? 2.2 : 0.4;
+  items.forEach((p, i) => {
+    p.y -= p.v * dt;
+    p.x += windX * dt * (type === "rain" ? 1 : Math.sin(p.ph + p.y));
+    if (p.y < 0.1) {
+      p.y = PRECIP_TOP_M;
+      p.x = (Math.random() * 2 - 1) * halfX;
+      p.z = (Math.random() * 2 - 1) * halfZ;
+    }
+    if (p.x > halfX) p.x -= 2 * halfX;
+    if (type === "rain") {
+      arr[i * 6] = p.x;
+      arr[i * 6 + 1] = p.y;
+      arr[i * 6 + 2] = p.z;
+      arr[i * 6 + 3] = p.x - windX * 0.045;
+      arr[i * 6 + 4] = p.y + p.v * 0.045;
+      arr[i * 6 + 5] = p.z;
+    } else {
+      arr[i * 3] = p.x;
+      arr[i * 3 + 1] = p.y;
+      arr[i * 3 + 2] = p.z;
+    }
+  });
+  pos.needsUpdate = true;
+}
+
+let nextFlashAt = 0;
+
+// Läuft pro Bild. true = die Teilchen haben sich bewegt (neu zeichnen).
+function tickWeather(now) {
+  const wx = effectiveWeather();
+  if (wx && wx.kind === "thunder" && now > nextFlashAt) {
+    nextFlashAt = now + 6000 + Math.random() * 12000;
+    flashEl.classList.remove("go");
+    void flashEl.offsetWidth; // Animation neu starten
+    flashEl.classList.add("go");
+  }
+  if (!precip) return false;
+  if (now - precip.last < 33) return false; // ca. 30 Bilder pro Sekunde reichen
+  const dt = precip.last ? Math.min(0.1, (now - precip.last) / 1000) : 0.033;
+  precip.last = now;
+  writePrecip(dt);
+  return true;
+}
+
+async function loadWeather() {
+  try {
+    const res = await fetch("/api/floorplan/weather", { cache: "no-store" });
+    if (res.ok) weatherData = await res.json();
+  } catch {
+    /* offline: letztes Wetter behalten */
+  }
+  applySky();
+}
+
+function setTimeMode(mode) {
+  timeMode = mode;
+  lsSet("fp.time", mode);
+  document.querySelectorAll("[data-time]").forEach((b) => b.classList.toggle("active", b.dataset.time === mode));
+  applySky();
+}
+
+function setWeatherMode(mode) {
+  weatherMode = mode;
+  lsSet("fp.weather", mode);
+  document.querySelectorAll("[data-weather]").forEach((b) => b.classList.toggle("active", b.dataset.weather === mode));
+  applySky();
+}
+
+document.querySelectorAll("[data-time]").forEach((b) => b.addEventListener("click", () => setTimeMode(b.dataset.time)));
+document.querySelectorAll("[data-weather]").forEach((b) => b.addEventListener("click", () => setWeatherMode(b.dataset.weather)));
+document.querySelectorAll("[data-time]").forEach((b) => b.classList.toggle("active", b.dataset.time === timeMode));
+document.querySelectorAll("[data-weather]").forEach((b) => b.classList.toggle("active", b.dataset.weather === weatherMode));
+
+// ---- Hitzekarte ----
+const HEAT_STOPS = [
+  [15, [59, 130, 255]],
+  [18, [70, 198, 255]],
+  [20.5, [63, 224, 160]],
+  [22.5, [181, 224, 74]],
+  [24.5, [255, 179, 71]],
+  [27, [255, 77, 61]],
+];
+
+function heatColor(t) {
+  if (t <= HEAT_STOPS[0][0]) return HEAT_STOPS[0][1];
+  for (let i = 1; i < HEAT_STOPS.length; i++) {
+    const [t1, c1] = HEAT_STOPS[i];
+    if (t <= t1) {
+      const [t0, c0] = HEAT_STOPS[i - 1];
+      const k = (t - t0) / (t1 - t0);
+      return c0.map((v, j) => Math.round(lerp(v, c1[j], k)));
+    }
+  }
+  return HEAT_STOPS[HEAT_STOPS.length - 1][1];
+}
+
+let heatMesh = null;
+let heatLabelKey = "";
+let heatLabel = null;
+
+function renderHeatMap() {
+  heatButton.classList.toggle("active", heatOn);
+  heatLegend.classList.toggle("hidden", !heatOn);
+  if (glowGroup) glowGroup.visible = !heatOn; // die weichen Wärmeflecken weichen der Hitzekarte
+  if (!scene || !modelData || !modelData.grid) return;
+  if (!heatOn || !rooms.length) {
+    if (heatMesh) heatMesh.visible = false;
+    requestRender();
+    return;
+  }
+  const grid = modelData.grid;
+  const key = JSON.stringify(rooms.map((r) => [r.x, r.z, norm(r.name)]));
+  if (key !== heatLabelKey || !heatLabel) {
+    heatLabelKey = key;
+    heatLabel = labelRoomCells(grid, rooms, true);
+  }
+  const temps = rooms.map((room) => {
+    const live = thermostatsFor(room).filter((t) => typeof t.room_temp === "number");
+    return live.length ? live.reduce((s, t) => s + t.room_temp, 0) / live.length : null;
+  });
+  const { gw, gh } = grid;
+  const small = document.createElement("canvas");
+  small.width = gw;
+  small.height = gh;
+  const sctx = small.getContext("2d");
+  const image = sctx.createImageData(gw, gh);
+  for (let i = 0; i < gw * gh; i++) {
+    const owner = heatLabel[i];
+    const t = owner >= 0 ? temps[owner] : null;
+    if (t === null || t === undefined) continue;
+    const [r, g, b] = heatColor(t);
+    image.data[i * 4] = r;
+    image.data[i * 4 + 1] = g;
+    image.data[i * 4 + 2] = b;
+    image.data[i * 4 + 3] = 235;
+  }
+  sctx.putImageData(image, 0, 0);
+  const big = document.createElement("canvas");
+  big.width = gw * 3;
+  big.height = gh * 3;
+  const bctx = big.getContext("2d");
+  bctx.imageSmoothingEnabled = true;
+  bctx.filter = "blur(3px)";
+  bctx.drawImage(small, 0, 0, big.width, big.height);
+
+  if (!heatMesh) {
+    heatMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(gw * GRID_CELL, gh * GRID_CELL),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, toneMapped: false })
+    );
+    heatMesh.rotation.x = -Math.PI / 2;
+    heatMesh.position.set(grid.minX + (gw * GRID_CELL) / 2, 0.121, grid.minZ + (gh * GRID_CELL) / 2);
+    heatMesh.renderOrder = 6;
+    scene.add(heatMesh);
+  }
+  if (heatMesh.material.map) heatMesh.material.map.dispose();
+  const texture = new THREE.CanvasTexture(big);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  heatMesh.material.map = texture;
+  heatMesh.material.needsUpdate = true;
+  heatMesh.visible = true;
+  requestRender();
+}
+
+function setHeat(on) {
+  heatOn = on;
+  lsSet("fp.heat", on ? "1" : "0");
+  renderHeatMap();
+}
+heatButton.addEventListener("click", () => setHeat(!heatOn));
+heatButton.classList.toggle("active", heatOn);
+
+// ---- Restlaufzeit der Maschinen ----
+const runLayer = document.createElement("div");
+runLayer.className = "fp-labels fp-runs";
+container.appendChild(runLayer);
+let runEls = []; // { el, x, y, z }
+
+const fmtDuration = (seconds) => {
+  const m = Math.max(1, Math.round(seconds / 60));
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return rest ? `${h} h ${rest} min` : `${h} h`;
+};
+const fmtClock = (iso) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+function runLabelContent(p) {
+  const run = p.run;
+  if (!run || run.state === "idle") return null;
+  if (run.state === "done") {
+    return {
+      cls: "done",
+      title: p.name,
+      text: `✓ fertig vor ${fmtDuration(run.since_s)}`,
+      sub: `lief ${fmtDuration(run.duration_s)} · ${(run.energy_wh / 1000).toFixed(2).replace(".", ",")} kWh`,
+      progress: 1,
+    };
+  }
+  const text = run.paused
+    ? "Pause im Programm"
+    : run.remaining_s != null
+      ? `noch ca. ${fmtDuration(run.remaining_s)}`
+      : run.longer_than_usual
+        ? "läuft länger als sonst"
+        : `läuft seit ${fmtDuration(run.elapsed_s)}`;
+  let sub;
+  if (run.remaining_s != null) sub = `fertig ca. ${fmtClock(run.finish_at)}${run.confidence === "grob" ? " (grob)" : ""}`;
+  else if (run.runs_known < 3) sub = "lernt die Dauer noch";
+  else sub = `seit ${fmtClock(run.started_at)}`;
+  return { cls: "running", title: p.name, text, sub, progress: run.progress };
+}
+
+function renderRunLabels() {
+  runLayer.replaceChildren();
+  runEls = [];
+  for (const p of props) {
+    if (p.device_id == null) continue;
+    const content = runLabelContent(p);
+    if (!content) continue;
+    const el = document.createElement("div");
+    el.className = `fp-run ${content.cls}`;
+    const title = document.createElement("div");
+    title.className = "fp-run-title";
+    title.textContent = content.title;
+    const text = document.createElement("div");
+    text.className = "fp-run-text";
+    text.textContent = content.text;
+    const sub = document.createElement("div");
+    sub.className = "fp-run-sub";
+    sub.textContent = content.sub;
+    el.append(title, text, sub);
+    if (content.progress != null) {
+      const bar = document.createElement("div");
+      bar.className = "fp-run-bar";
+      const fill = document.createElement("i");
+      fill.style.width = `${Math.round(Math.min(1, Math.max(0, content.progress)) * 100)}%`;
+      bar.appendChild(fill);
+      el.appendChild(bar);
+    }
+    runLayer.appendChild(el);
+    // Lage: Mitte der Teile, Richtung Raumschild versetzt, damit nebeneinander stehende Geräte sich nicht überdecken
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let z0 = Infinity;
+    let z1 = -Infinity;
+    let top = 0;
+    for (const s of p.parts) {
+      x0 = Math.min(x0, s.x0);
+      x1 = Math.max(x1, s.x1);
+      z0 = Math.min(z0, s.z0);
+      z1 = Math.max(z1, s.z1);
+      top = Math.max(top, s.y1);
+    }
+    let cx = (x0 + x1) / 2;
+    const cz = (z0 + z1) / 2;
+    let nearest = null;
+    for (const r of rooms) {
+      const dist = Math.hypot(r.x - cx, r.z - cz);
+      if (!nearest || dist < nearest.dist) nearest = { r, dist };
+    }
+    if (nearest) cx += Math.sign(nearest.r.x - cx) * Math.min(0.55, Math.abs(nearest.r.x - cx));
+    runEls.push({ el, x: cx, y: FLOOR_TOP_M + top + 0.25, z: cz });
+  }
+  updateRunPositions();
+}
+
+const overlapArea = (a, b) => Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+
+// Setzt die Restlaufzeit-Schilder an die Geräte und schiebt sie so, dass sie weder einander noch die
+// Raum-Schilder verdecken (nebeneinander stehende Geräte liegen im Plan nur wenige Pixel auseinander).
+function updateRunPositions() {
+  if (!camera || !runEls.length) return;
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  const base = container.getBoundingClientRect();
+  const obstacles = labelEls
+    .filter((el) => el.style.display !== "none")
+    .map((el) => {
+      const r = el.getBoundingClientRect();
+      return { l: r.left - base.left, t: r.top - base.top, r: r.right - base.left, b: r.bottom - base.top };
+    });
+  const placed = [];
+  for (const item of runEls) {
+    placeOverlay(item.el, item.x, item.y, item.z, w, h);
+    if (item.el.style.display === "none") continue;
+    const ew = item.el.offsetWidth;
+    const eh = item.el.offsetHeight;
+    const cx = parseFloat(item.el.style.left);
+    const cy = parseFloat(item.el.style.top);
+    let best = null;
+    for (const fy of [0, -1, 1, -2, 2]) {
+      for (const fx of [0, -1, 1, -2, 2]) {
+        const dx = fx * (ew * 0.62);
+        const dy = fy * (eh + 4);
+        const rect = { l: cx - ew / 2 + dx, t: cy - eh + dy, r: cx + ew / 2 + dx, b: cy + dy };
+        let cost = Math.hypot(dx, dy) * 0.5;
+        for (const o of obstacles) cost += overlapArea(rect, o) * 0.6;
+        for (const o of placed) cost += overlapArea(rect, o) * 3;
+        if (!best || cost < best.cost) best = { cost, dx, dy, rect };
+      }
+    }
+    item.el.style.left = `${cx + best.dx}px`;
+    item.el.style.top = `${cy + best.dy}px`;
+    placed.push(best.rect);
+  }
+}
+
+function startSky() {
+  loadWeather();
+  if (weatherTimer === null) weatherTimer = setInterval(loadWeather, WEATHER_POLL_MS);
+  if (skyTimer === null) skyTimer = setInterval(applySky, SKY_TICK_MS);
+}
+
+function stopSky() {
+  if (weatherTimer !== null) clearInterval(weatherTimer);
+  if (skyTimer !== null) clearInterval(skyTimer);
+  weatherTimer = null;
+  skyTimer = null;
+}
+
 function startViewer() {
   if (!initialized) {
     initialized = true;
@@ -3025,6 +3616,7 @@ function startViewer() {
     setupRoomEditing();
   }
   if (!renderer) return;
+  startSky();
   loadRooms(); // bei jedem Öffnen neu holen, damit Änderungen von anderen Geräten sichtbar sind
   loadCabinets();
   loadTvs();
@@ -3063,6 +3655,7 @@ function stopViewer() {
     clearInterval(tvTimer);
     tvTimer = null;
   }
+  stopSky();
   closeTempDialog();
 }
 

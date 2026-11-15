@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from .. import poller
+from .. import poller, runs, weather
 from ..db import db_cursor
 
 router = APIRouter()
@@ -316,12 +316,25 @@ def _prop_state(prop: dict) -> dict:
     if reading and reading.get("power_w") is not None:
         out["power_w"] = round(float(reading["power_w"]), 1)
         out["on"] = out["power_w"] >= float(prop.get("on_watts", 8))
+    if device_id is not None:
+        # Programmlauf aus dem Stromverlauf (Restlaufzeit); nur für Geräte mit eigener Steckdose
+        out["run"] = runs.run_state(device_id, float(prop.get("on_watts", 8)))
     return out
+
+
+def _props_state() -> list[dict]:
+    return [_prop_state(p) for p in _load(PROPS_KEY, [])]
 
 
 @router.get("/props")
 async def get_props():
-    return {"props": [_prop_state(p) for p in await asyncio.to_thread(_load, PROPS_KEY, [])]}
+    return {"props": await asyncio.to_thread(_props_state)}
+
+
+@router.get("/weather")
+async def get_weather():
+    """Aktuelles Wetter (Zwischenspeicher 15 min) für Himmel/Regen/Schnee im Grundriss."""
+    return await weather.get_weather()
 
 
 @router.put("/props")
@@ -331,7 +344,7 @@ async def put_props(body: PropsIn):
         raise HTTPException(400, "IDs müssen eindeutig sein")
     items = [p.model_dump() for p in body.props]
     await asyncio.to_thread(_save, PROPS_KEY, items)
-    return {"props": [_prop_state(p) for p in items]}
+    return {"props": await asyncio.to_thread(lambda: [_prop_state(p) for p in items])}
 
 
 _tv_ping_cache: dict[str, tuple[float, bool]] = {}

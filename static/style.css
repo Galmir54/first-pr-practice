@@ -1537,3 +1537,169 @@ button.danger-link {
 .fp-look {
   align-items: center;
 }
+
+
+/* Tag/Nacht-Filter, Wetter, Hitzekarte, Restlaufzeit-Schilder der Maschinen */
+.fp-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  background: #fff;
+  transition: background 1.2s;
+}
+
+.fp-fog {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 40%, rgba(226, 233, 240, 0.34), rgba(200, 212, 224, 0.52));
+  opacity: 0;
+  transition: opacity 1.2s;
+}
+
+.fp-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: #fff;
+  opacity: 0;
+}
+
+.fp-flash.go {
+  animation: fp-flash 0.8s ease-out;
+}
+
+@keyframes fp-flash {
+  0% { opacity: 0; }
+  8% { opacity: 0.7; }
+  20% { opacity: 0.1; }
+  30% { opacity: 0.5; }
+  100% { opacity: 0; }
+}
+
+.fp-weather {
+  position: absolute;
+  right: 12px;
+  top: 48px;
+  z-index: 3;
+  max-width: calc(100% - 24px);
+  padding: 5px 12px;
+  font-size: 0.72rem;
+  color: var(--text);
+  background: rgba(8, 18, 27, 0.78);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.fp-heat-btn {
+  position: absolute;
+  right: 12px;
+  top: 86px;
+  z-index: 3;
+  padding: 5px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: rgba(8, 18, 27, 0.78);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.fp-heat-btn.active {
+  color: #ffb347;
+  border-color: #ffb347;
+  background: rgba(255, 179, 71, 0.14);
+}
+
+.fp-heat-legend {
+  position: absolute;
+  right: 12px;
+  top: 124px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  background: rgba(8, 18, 27, 0.78);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.fp-heat-legend.hidden {
+  display: none;
+}
+
+.fp-heat-legend i {
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #3b82ff, #46c6ff, #3fe0a0, #b5e04a, #ffb347, #ff4d3d);
+}
+
+.fp-run {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%);
+  min-width: 104px;
+  padding: 5px 10px 6px;
+  text-align: center;
+  color: var(--text);
+  background: rgba(8, 18, 27, 0.9);
+  border: 1px solid rgba(74, 163, 255, 0.7);
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+.fp-run.done {
+  border-color: rgba(57, 255, 157, 0.75);
+}
+
+.fp-run-title {
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.fp-run-text {
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fp-run-sub {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.fp-run-bar {
+  height: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
+}
+
+.fp-run-bar i {
+  display: block;
+  height: 100%;
+  background: #4aa3ff;
+  border-radius: 2px;
+}
+
+.fp-run.done .fp-run-bar i {
+  background: #39ff9d;
+}
