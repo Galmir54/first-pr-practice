@@ -55,8 +55,8 @@ class Opening(BaseModel):
     hinge: int = Field(default=1, ge=-1, le=1)  # auf welcher Seite die Bänder sitzen
     swing: int = Field(default=1, ge=-1, le=1)  # in welche Richtung der Flügel aufschwingt
     name: str = Field(default="", max_length=40)
-    # nur für Schranktüren (kind "cabinet"): Aussehen der Front
-    style: str = Field(default="white", pattern="^(white|mirror|oak)$")
+    # Schranktüren (kind "cabinet"): Aussehen der Front; Fenster: "bare" = ohne Vorhang/Rollo
+    style: str = Field(default="white", pattern="^(white|mirror|oak|bare)$")
 
 
 class Cabinet(BaseModel):

@@ -2775,7 +2775,9 @@ function windowDecor(group, grid, label, mats) {
     local.add(sill);
 
     const top = o.head + 0.18;
-    if (/schlaf/.test(room)) {
+    if (o.style === "bare") {
+      // ohne Vorhang/Rollo (z.B. Fenster hinter einem Schreibtisch mit Geräten)
+    } else if (/schlaf/.test(room)) {
       // Rollo wie auf dem Foto: aubergine, etwa zu einem Drittel heruntergelassen
       const drop = (o.head - o.sill) * 0.35;
       const casing = box(o.width + 0.06, 0.07, 0.08, mats.rolloCase, false);
@@ -3068,7 +3070,7 @@ function buildDecor() {
   if (!scene || !modelData || !modelData.wallFaces) return;
   const signature = JSON.stringify([
     rooms.map((r) => [r.x, r.z, norm(r.name)]),
-    openings.map((o) => [o.id, o.kind, o.x, o.z, o.width, o.along, o.sill, o.head, o.swing, o.thick]),
+    openings.map((o) => [o.id, o.kind, o.x, o.z, o.width, o.along, o.sill, o.head, o.swing, o.thick, o.kind === "window" ? o.style : null]),
     cabinets,
     lowboardTvs().map((t) => [t.x_front, t.x_back, t.z_min, t.z_max]),
     props.map((p) => p.cutout || null),
