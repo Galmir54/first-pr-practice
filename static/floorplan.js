@@ -1619,6 +1619,21 @@ labelScaleSlider.addEventListener("input", () => {
 });
 
 // Zahnrad: Einstellungsfenster ein-/ausblenden (Zustand pro Gerät gemerkt, Standard: ausgeblendet).
+// Fragezeichen oben rechts: blendet die Legende (zu/offen, Punkt antippen) ein und aus
+const helpButton = document.getElementById("fpHelpBtn");
+const helpLegend = document.getElementById("fpLegend");
+
+function setHelpOpen(open) {
+  helpLegend.classList.toggle("hidden", !open);
+  helpButton.setAttribute("aria-expanded", String(open));
+}
+
+helpButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setHelpOpen(helpLegend.classList.contains("hidden"));
+});
+document.addEventListener("click", () => setHelpOpen(false));
+
 const gearButton = document.getElementById("fpGear");
 const PANEL_KEY = "fp.panelOpen";
 

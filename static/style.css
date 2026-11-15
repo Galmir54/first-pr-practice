@@ -1285,22 +1285,52 @@ button.danger-link {
   max-width: 90%;
 }
 
-/* Legende für Türen/Fenster (oben rechts) */
-.fp-legend {
+/* Hilfe (oben rechts): Fragezeichen-Knopf, der die Legende für Türen/Fenster ein-/ausblendet */
+.fp-help-btn {
   position: absolute;
   right: 12px;
   top: 10px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  font-size: 0.72rem;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
   color: var(--text-dim);
   background: rgba(8, 18, 27, 0.78);
   border: 1px solid var(--card-border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.fp-help-btn[aria-expanded="true"] {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.fp-legend {
+  position: absolute;
+  right: 12px;
+  top: 48px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: rgba(8, 18, 27, 0.92);
+  border: 1px solid var(--card-border);
   border-radius: 10px;
   pointer-events: none;
+}
+
+.fp-legend.hidden {
+  display: none;
 }
 
 .fp-dot {
