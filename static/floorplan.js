@@ -1338,6 +1338,7 @@ async function pollTemperatures() {
     /* alte Werte behalten */
   }
   renderLabels();
+  applyPropHeat();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2439,6 +2440,9 @@ function getPropMaterials() {
     }),
     // leuchtende Anzeige (anim "glow") und Lichtschein auf dem Boden (anim "show")
     led: new THREE.MeshBasicMaterial({ color: 0x8be3ff, toneMapped: false, ...clip }),
+    // Heizkörper (anim "heat"): rötlich = Thermostat heizt, bläulich = heizt nicht
+    heathot: new THREE.MeshStandardMaterial({ color: 0xe0584a, roughness: 0.5, emissive: 0x6a1a10, emissiveIntensity: 0.7, ...clip }),
+    heatcold: new THREE.MeshStandardMaterial({ color: 0x7fa7d8, roughness: 0.5, emissive: 0x10264a, emissiveIntensity: 0.35, ...clip }),
     glowblue: glowMat(0x4cb8ff),
     glowamber: glowMat(0xffb347),
     glowcyan: glowMat(0x5af0e0),
@@ -2525,6 +2529,9 @@ function buildProp(p) {
       };
       const layers = [makeLayer(false, [0.34, 0.6], 0.003), makeLayer(true, [0.55, 1.0], 0.005)];
       anims.push({ type: "status", layers, phase: Math.random() * 6, active: false, calm: false });
+    } else if (s.anim === "heat") {
+      mesh.material = mats.heatcold;
+      anims.push({ type: "heat", mesh, hot: mats.heathot, cold: mats.heatcold });
     } else if (s.anim === "glow") {
       anims.push({ type: "glow", mesh, off: material, on: mats.led });
     } else if (s.anim === "show") {
@@ -2621,6 +2628,25 @@ function shimmerStatus(a) {
   body.plane.rotation.z = -0.08 * k * Math.sin(p * 0.51 + 1);
 }
 
+// Heizkörper färben: rötlich, wenn ein Thermostat des Raums (Prop.heat_room) gerade heizt, sonst bläulich
+function applyPropHeat() {
+  let changed = false;
+  props.forEach((p, i) => {
+    const obj = propObjs[i];
+    if (!obj || !p.heat_room) return;
+    const heating = thermostatsFor({ name: p.heat_room }).some((t) => t.heating);
+    for (const a of obj.anims) {
+      if (a.type !== "heat") continue;
+      const want = heating ? a.hot : a.cold;
+      if (a.mesh.material !== want) {
+        a.mesh.material = want;
+        changed = true;
+      }
+    }
+  });
+  if (changed) requestRender();
+}
+
 let lastStatusTick = 0;
 // Schimmern der Statuswolken: ca. 20 Bilder pro Sekunde reichen, Schatten ändern sich dabei nicht.
 // true = es wurde ein Schritt gemacht (neu zeichnen).
@@ -2680,6 +2706,7 @@ function applyProps() {
     });
   }
   props.forEach((p, i) => propObjs[i] && applyPropState(propObjs[i], Boolean(p.on), p.run && p.run.state));
+  applyPropHeat();
   renderRunLabels();
   if (changed) {
     applyModelCutouts();
