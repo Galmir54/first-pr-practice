@@ -3493,14 +3493,21 @@ const fmtClock = (iso) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-d
 function runLabelContent(p) {
   const run = p.run;
   if (!run || run.state === "idle") return null;
+  const title = run.job ? `${p.name} · ${run.job.length > 18 ? run.job.slice(0, 17) + "…" : run.job}` : p.name;
   if (run.state === "done") {
-    return {
-      cls: "done",
-      title: p.name,
-      text: `✓ fertig vor ${fmtDuration(run.since_s)}`,
-      sub: `lief ${fmtDuration(run.duration_s)} · ${(run.energy_wh / 1000).toFixed(2).replace(".", ",")} kWh`,
-      progress: 1,
-    };
+    const kwh = run.energy_wh != null ? ` · ${(run.energy_wh / 1000).toFixed(2).replace(".", ",")} kWh` : "";
+    return { cls: "done", title, text: `✓ fertig vor ${fmtDuration(run.since_s)}`, sub: `lief ${fmtDuration(run.duration_s)}${kwh}`, progress: 1 };
+  }
+  if (run.source === "cloud") {
+    // Fortschritt und Restzeit kommen direkt vom Drucker (Anycubic-Cloud)
+    const pct = run.progress != null ? `${Math.round(run.progress * 100)} %` : "";
+    let text;
+    if (run.paused) text = "Pausiert";
+    else if (run.preparing && run.remaining_s == null) text = "Aufheizen / Vorbereiten";
+    else if (run.remaining_s != null) text = `noch ca. ${fmtDuration(run.remaining_s)}`;
+    else text = run.elapsed_s != null ? `druckt seit ${fmtDuration(run.elapsed_s)}` : "druckt";
+    const sub = [run.finish_at ? `fertig ca. ${fmtClock(run.finish_at)}` : "", pct].filter(Boolean).join(" · ") || "laut Anycubic-Cloud";
+    return { cls: "running", title, text, sub, progress: run.progress };
   }
   const text = run.paused
     ? "Pause im Programm"
@@ -3514,7 +3521,7 @@ function runLabelContent(p) {
   else if (run.estimate === false) sub = `seit ${fmtClock(run.started_at)} · ${(run.energy_wh / 1000).toFixed(2).replace(".", ",")} kWh`;
   else if (run.runs_known < 3) sub = "lernt die Dauer noch";
   else sub = `seit ${fmtClock(run.started_at)}`;
-  return { cls: "running", title: p.name, text, sub, progress: run.progress };
+  return { cls: "running", title, text, sub, progress: run.progress };
 }
 
 function renderRunLabels() {
@@ -3614,7 +3621,83 @@ function updateRunPositions() {
   }
 }
 
+// ---- Anycubic-Cloud (Token eintragen, Status) ----
+const cloudStatusEl = document.getElementById("fpCloudStatus");
+const cloudTokenEl = document.getElementById("fpCloudToken");
+const cloudSaveEl = document.getElementById("fpCloudSave");
+const cloudRemoveEl = document.getElementById("fpCloudRemove");
+const cloudExtraEl = document.getElementById("fpCloudExtra");
+const cloudPrinterEl = document.getElementById("fpCloudPrinter");
+
+function renderCloud(data) {
+  if (!data) {
+    cloudStatusEl.textContent = "nicht erreichbar";
+    return;
+  }
+  const printer = (data.printers || []).find((p) => p.id === data.selected_id);
+  const names = {
+    not_configured: "nicht eingerichtet",
+    ok: printer ? `verbunden · ${printer.name || printer.model}` : "verbunden · kein Drucker gefunden",
+    token_invalid: data.message || "Token ungültig",
+    error: `Fehler: ${data.message || "unbekannt"}`,
+  };
+  cloudStatusEl.textContent = names[data.status] || data.status;
+  cloudStatusEl.dataset.state = data.status;
+  cloudExtraEl.classList.toggle("hidden", !data.configured);
+  cloudPrinterEl.replaceChildren();
+  for (const p of data.printers || []) {
+    const option = document.createElement("option");
+    option.value = String(p.id);
+    option.textContent = p.name || p.model || `Drucker ${p.id}`;
+    option.selected = p.id === data.selected_id;
+    cloudPrinterEl.appendChild(option);
+  }
+  cloudPrinterEl.classList.toggle("hidden", (data.printers || []).length < 2);
+}
+
+async function cloudRequest(method, path, body) {
+  try {
+    const res = await fetch(`/api/floorplan/anycubic${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    /* Server nicht erreichbar */
+  }
+  return null;
+}
+
+async function loadCloud() {
+  renderCloud(await cloudRequest("GET", ""));
+}
+
+cloudSaveEl.addEventListener("click", async () => {
+  const token = cloudTokenEl.value.trim();
+  if (token.length < 20) {
+    cloudStatusEl.textContent = "Token zu kurz - bitte komplett einfügen";
+    return;
+  }
+  cloudStatusEl.textContent = "prüfe …";
+  const data = await cloudRequest("PUT", "/token", { token });
+  cloudTokenEl.value = ""; // der Token bleibt nicht im Browser
+  renderCloud(data);
+  loadProps();
+});
+cloudRemoveEl.addEventListener("click", async () => {
+  if (!window.confirm("Anycubic-Token vom Pi löschen?")) return;
+  renderCloud(await cloudRequest("DELETE", "/token"));
+  loadProps();
+});
+cloudPrinterEl.addEventListener("change", async () => {
+  renderCloud(await cloudRequest("PUT", "/printer", { printer_id: parseInt(cloudPrinterEl.value, 10) }));
+  loadProps();
+});
+
 function startSky() {
+  loadCloud();
   loadWeather();
   if (weatherTimer === null) weatherTimer = setInterval(loadWeather, WEATHER_POLL_MS);
   if (skyTimer === null) skyTimer = setInterval(applySky, SKY_TICK_MS);

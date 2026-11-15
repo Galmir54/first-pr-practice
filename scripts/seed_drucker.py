@@ -64,7 +64,7 @@ for dx, dy in ((0.075, 0.009), (0.009, 0.075)):  # waagerechte und senkrechte Sp
                       y0=round(TOP + SY - dy, 3), y1=round(TOP + SY + dy, 3), mat="white",
                       anim="spin", axis="z", px=SX, py=round(TOP + SY, 3), pz=ZC, speed=1.1))
 
-prop = dict(id="drucker", name="FDM Drucker", parts=parts, device_id=6, on_watts=ON_WATTS, estimate=False)
+prop = dict(id="drucker", name="FDM Drucker", parts=parts, device_id=6, on_watts=ON_WATTS, estimate=False, cloud="anycubic")
 
 
 def req(method, url, body=None):

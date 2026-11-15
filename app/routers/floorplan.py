@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from .. import poller, runs, weather
+from .. import anycubic, poller, runs, weather
 from ..db import db_cursor
 
 router = APIRouter()
@@ -191,6 +191,8 @@ class Prop(BaseModel):
     on_watts: float = Field(default=8, gt=0, lt=5000)
     # False: keine Restzeit-Schätzung (z.B. 3D-Drucker, jeder Druck dauert anders), nur "läuft seit"
     estimate: bool = True
+    # "anycubic": Fortschritt und Restzeit kommen aus der Anycubic-Cloud (wenn dort ein Token eingetragen ist)
+    cloud: str | None = Field(default=None, pattern="^anycubic$")
 
 
 class PropsIn(BaseModel):
@@ -323,6 +325,12 @@ def _prop_state(prop: dict) -> dict:
     if device_id is not None:
         # Programmlauf aus dem Stromverlauf (Restlaufzeit); nur für Geräte mit eigener Steckdose
         out["run"] = runs.run_state(device_id, float(prop.get("on_watts", 8)), bool(prop.get("estimate", True)))
+    if prop.get("cloud") == "anycubic":
+        cloud = anycubic.cloud_run_state()
+        if cloud:
+            out["run"] = cloud
+            if cloud["state"] == "running":
+                out["on"] = True  # die Cloud weiß es genauer als die Leistung (Aufheizpausen)
     return out
 
 
@@ -333,6 +341,42 @@ def _props_state() -> list[dict]:
 @router.get("/props")
 async def get_props():
     return {"props": await asyncio.to_thread(_props_state)}
+
+
+class AnycubicTokenIn(BaseModel):
+    token: str = Field(min_length=20, max_length=4000)
+
+
+class AnycubicPrinterIn(BaseModel):
+    printer_id: int | None = None
+
+
+@router.get("/anycubic")
+async def get_anycubic():
+    """Zustand der Anycubic-Cloud-Anbindung (nie der Token selbst)."""
+    return anycubic.public_state()
+
+
+@router.put("/anycubic/token")
+async def put_anycubic_token(body: AnycubicTokenIn):
+    """Speichert den Web-Token des Anycubic-Kontos und fragt sofort ab."""
+    await asyncio.to_thread(anycubic.set_token, body.token)
+    anycubic.wake()
+    await asyncio.sleep(2.5)  # kurz auf die erste Antwort warten, damit das Einstellungsfenster das Ergebnis zeigt
+    return anycubic.public_state()
+
+
+@router.delete("/anycubic/token")
+async def delete_anycubic_token():
+    await asyncio.to_thread(anycubic.set_token, None)
+    return anycubic.public_state()
+
+
+@router.put("/anycubic/printer")
+async def put_anycubic_printer(body: AnycubicPrinterIn):
+    await asyncio.to_thread(anycubic.set_printer_id, body.printer_id)
+    anycubic.wake()
+    return anycubic.public_state()
 
 
 @router.get("/weather")

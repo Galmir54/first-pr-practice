@@ -180,6 +180,21 @@
           <button class="fp-btn" data-weather="thunder">Gewitter</button>
           <button class="fp-btn" data-weather="fog">Nebel</button>
         </div>
+        <div class="fp-cloud">
+          <div class="fp-cloud-head">
+            <span class="fp-slider-label">Anycubic</span>
+            <span class="fp-cloud-status" id="fpCloudStatus">nicht eingerichtet</span>
+          </div>
+          <div class="fp-cloud-row">
+            <input type="password" id="fpCloudToken" placeholder="Token aus der Anycubic-Cloud einfügen" autocomplete="off" spellcheck="false" />
+            <button class="fp-btn" id="fpCloudSave">Speichern</button>
+          </div>
+          <div class="fp-cloud-row hidden" id="fpCloudExtra">
+            <select id="fpCloudPrinter"></select>
+            <button class="fp-btn" id="fpCloudRemove">Entfernen</button>
+          </div>
+          <div class="fp-cloud-help">Token holen: auf cloud-universe.anycubic.com anmelden, F12 &rarr; Konsole &rarr; <code>window.localStorage["XX-Token"]</code> eingeben und das Ergebnis kopieren. Er wird nur auf dem Pi gespeichert.</div>
+        </div>
         <label class="fp-slider">
           <span class="fp-slider-label">Schilder</span>
           <input type="range" id="fpLabelScale" min="0.6" max="1.8" step="0.05" value="1" />

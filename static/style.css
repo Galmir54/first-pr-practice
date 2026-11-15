@@ -1703,3 +1703,75 @@ button.danger-link {
 .fp-run.done .fp-run-bar i {
   background: #39ff9d;
 }
+
+
+/* Anycubic-Cloud im Einstellungsfenster */
+.fp-cloud {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--card-border);
+}
+
+.fp-cloud-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fp-cloud-status {
+  color: var(--text);
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.fp-cloud-status[data-state="ok"] {
+  color: #39ff9d;
+}
+
+.fp-cloud-status[data-state="token_invalid"],
+.fp-cloud-status[data-state="error"] {
+  color: #ffb04a;
+}
+
+.fp-cloud-row {
+  display: flex;
+  gap: 6px;
+}
+
+.fp-cloud-row.hidden {
+  display: none;
+}
+
+.fp-cloud-row input,
+.fp-cloud-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 0.78rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+}
+
+.fp-cloud-row select.hidden {
+  display: none;
+}
+
+.fp-cloud-help {
+  font-size: 0.66rem;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.fp-cloud-help code {
+  color: var(--text);
+  word-break: break-all;
+}
