@@ -1,9 +1,13 @@
-"""Ladestation des ECOVACS-Saugroboters (Omni-Station) im Schlafzimmer, rechts hinter der Tür t8 an der Nordwand.
+"""Ladestation des ECOVACS-Saugroboters (Omni-Station) im Schlafzimmer, an der Ostwand im freien Streifen.
 
-Lage (gemessen): Nordwand innen z 0,18, Tür t8 x -0,83..-0,09, Bett erst ab z 1,16; die Station steht an der Wand
-östlich der Tür, Front nach Süden (+z). Der Roboter dockt in der Mitte der unteren Bucht an: Mitte x 0,22 / z 0,46
-(= dock_x/dock_z der Kalibrierung in app/ecovacs.py). Maße ungefähr nach den Omni-Stationen (ca. 42 x 50 x 52 cm),
-nicht gemessen: untere Bucht für den Roboter mit Seitenwänden, darüber Wasserbehälter/Staubbeutel-Block mit Deckel.
+Lage (Nutzer hat sie im Plan eingekreist, 16.11.): an der Ostwand (Wand innen x 1,31), in der Höhe z ca. 0,9..1,3,
+Rückseite an der Wand, Front nach Westen (-x). Der Roboter dockt in der Mitte der unteren Bucht an: Mitte x 1,03 /
+z 1,08 (= dock_x/dock_z der Kalibrierung in app/ecovacs.py). Maße ungefähr nach den Omni-Stationen (ca. 42 x 50 x 52 cm),
+nicht gemessen: untere Bucht mit Seitenwänden, darüber Wasserbehälter/Staubbeutel-Block mit Deckel.
+
+Bodenhöhe: Das 3D-Modell hat dort einen groben Bettklotz, der Boden steigt von z 0,7 (0,19 m) bis z 1,5 (0,36 m) an;
+an der Station ca. 0,27 m. Deshalb steht die Station auf einem Sockel (LIFT), der den Höhenunterschied zum Boden
+(FLOOR_TOP 0,10 m) ausgleicht; der Roboter folgt im Browser der echten Bodenhöhe.
 
 Aufruf: py -I scripts/seed_ecovacs_station.py http://host:8000   (ersetzt nur das eigene Prop)
 """
@@ -13,28 +17,33 @@ import urllib.request
 
 base = sys.argv[1].rstrip("/")
 
-X0, X1 = 0.01, 0.43  # Breite 42 cm, Mitte x 0,22
-ZW = 0.185  # Rückseite an der Wand (Innenseite z 0,18)
-ZF = 0.69  # Vorderkante des Sockels (Tiefe ca. 50 cm)
+XW = 1.305  # Rückseite an der Ostwand (Wand innen x 1,31)
+ZC = 1.08  # Mitte der Station entlang der Wand
+LIFT = 0.19  # Sockelhöhe über FLOOR_TOP (0,10 m): Oberkante des Sockels ca. 0,29 m = Boden an der Station + Reserve
 
 parts = []
 
 
-def box(x0, x1, z0, z1, y0, y1, mat="white", **kw):
-    parts.append(dict(x0=round(x0, 3), x1=round(x1, 3), z0=round(z0, 3), z1=round(z1, 3),
-                      y0=round(y0, 3), y1=round(y1, 3), mat=mat, **kw))
+def box(u0, u1, d0, d1, y0, y1, mat="white"):
+    """u = entlang der Wand (z), d = Abstand von der Wand nach Westen (x), y = Höhe über dem Sockel."""
+    parts.append(dict(x0=round(XW - d1, 3), x1=round(XW - d0, 3), z0=round(ZC + u0, 3), z1=round(ZC + u1, 3),
+                      y0=round(LIFT + y0, 3), y1=round(LIFT + y1, 3), mat=mat))
 
 
-# Sockel (Auffahrplatte) und die Bucht, in die der Roboter fährt: Seitenwände und Rückwand
-box(X0, X1, ZW, ZF, 0.0, 0.02, "gray")
-box(X0, X0 + 0.03, ZW, 0.62, 0.02, 0.15, "white")
-box(X1 - 0.03, X1, ZW, 0.62, 0.02, 0.15, "white")
-box(X0 + 0.03, X1 - 0.03, ZW, 0.27, 0.02, 0.15, "white")
+W = 0.21  # halbe Breite
+# Sockel unter allem: füllt den Raum zwischen Boden und Auffahrplatte
+parts.append(dict(x0=round(XW - 0.505, 3), x1=round(XW, 3), z0=round(ZC - W, 3), z1=round(ZC + W, 3), y0=0.0,
+                  y1=round(LIFT, 3), mat="gray"))
+# Auffahrplatte und die Bucht, in die der Roboter fährt: Seitenwände und Rückwand
+box(-W, W, 0.0, 0.505, 0.0, 0.02, "gray")
+box(-W, -W + 0.03, 0.0, 0.435, 0.02, 0.15, "white")
+box(W - 0.03, W, 0.0, 0.435, 0.02, 0.15, "white")
+box(-W + 0.03, W - 0.03, 0.0, 0.085, 0.02, 0.15, "white")
 # Aufbau über der Bucht: Wasserbehälter und Staubbeutel, vorn eine getönte Scheibe und eine Anzeige
-box(X0, X1, ZW, 0.58, 0.15, 0.52, "white")
-box(X0, X1, ZW, 0.58, 0.52, 0.545, "gray")  # Deckel
-box(X0 + 0.04, X1 - 0.04, 0.58, 0.585, 0.19, 0.46, "glass")  # Scheibe
-box(0.17, 0.27, 0.58, 0.585, 0.47, 0.50, "black")  # Anzeige
+box(-W, W, 0.0, 0.395, 0.15, 0.52, "white")
+box(-W, W, 0.0, 0.395, 0.52, 0.545, "gray")  # Deckel
+box(-W + 0.04, W - 0.04, 0.395, 0.40, 0.19, 0.46, "glass")  # Scheibe
+box(-0.05, 0.05, 0.395, 0.40, 0.47, 0.50, "black")  # Anzeige
 
 prop = dict(id="ecovacs_station", name="Saugroboter-Station", parts=parts)
 

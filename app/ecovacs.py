@@ -55,9 +55,11 @@ TRAIL_MAX = 600
 TRAIL_MIN_STEP_MM = 80
 
 # Lage der Ladestation im Plan (Mitte des Roboters, wenn er andockt) und Umrechnung der Roboter-Karte:
-# Schlafzimmer, rechts hinter der Tür t8 an der Nordwand (Wand innen z 0,18); Roboter-Karte: x nach rechts, y nach oben,
-# Plan: x nach rechts, z nach unten (Süden) -> y wird gespiegelt; Einheit der Karte mm.
-DEFAULT_CALIBRATION = {"dock_x": 0.22, "dock_z": 0.46, "rot": 0.0, "flip_y": True, "scale": 0.001}
+# Schlafzimmer, an der Ostwand (Wand innen x 1,31) bei z 1,08, Front nach Westen (vom Nutzer im Plan eingekreist, 16.11.);
+# Roboter-Karte: x nach rechts, y nach oben, Plan: x nach rechts, z nach unten (Süden) -> y wird gespiegelt; Einheit mm.
+# Die Drehung 90 ist ein erster Versuch (der Roboter fährt aus der Station nach Westen); die echte Lage der Roboter-Karte
+# ist unbekannt und wird mit dem ersten Reinigungslauf eingestellt.
+DEFAULT_CALIBRATION = {"dock_x": 1.03, "dock_z": 1.08, "rot": 90.0, "flip_y": True, "scale": 0.001}
 
 state: dict = {
     "status": "not_configured",  # not_configured | installing | login | verify_required | connecting | ok | auth_failed | error

@@ -650,6 +650,7 @@ function applyFloorTypes() {
   };
   addFloor(woodTris, mats.wood, [FLOOR_TILE_M, FLOOR_TILE_M]);
   addFloor(tileTris, mats.tile, [TILE_SIZE_M, (TILE_SIZE_M * TILE_CANVAS_H) / TILE_CANVAS_W]);
+  floorYCache.clear();
   requestRender();
 }
 
@@ -3641,10 +3642,30 @@ const runLayer = document.createElement("div");
 runLayer.className = "fp-labels fp-runs";
 container.appendChild(runLayer);
 let runEls = []; // { el, x, y, z }
+// Höhe des Holzbodens an einer Stelle (aus dem Boden-Mesh; das Modell hat dort teils schräge Möbelklötze, der Boden ist
+// also nicht überall auf FLOOR_TOP_M). Ergebnisse werden im 2-cm-Raster gemerkt.
+const floorYCache = new Map();
+const floorRaycaster = new THREE.Raycaster();
+function floorYAt(x, z) {
+  const key = `${Math.round(x * 50)},${Math.round(z * 50)}`;
+  if (floorYCache.has(key)) return floorYCache.get(key);
+  let y = FLOOR_TOP_M + 0.02;
+  if (floorGroup) {
+    floorRaycaster.set(new THREE.Vector3(x, 3, z), new THREE.Vector3(0, -1, 0));
+    const hit = floorRaycaster.intersectObject(floorGroup, true);
+    if (hit.length) y = hit[0].point.y;
+    else return y; // Boden noch nicht da / außerhalb: nicht merken
+  } else {
+    return y;
+  }
+  floorYCache.set(key, y);
+  return y;
+}
+
 // Saugroboter (ECOVACS): Daten vom Server, 3D-Teile, geglättete Anzeige-Lage und sein Schild (siehe weiter unten)
 let robotData = null;
-let robotPose = null; // { x, z, ang } - was gerade gezeichnet wird (folgt robotTarget weich)
-let robotTarget = null; // { x, z, ang } - letzte Lage vom Server
+let robotPose = null; // { x, y, z, ang } - was gerade gezeichnet wird (folgt robotTarget weich)
+let robotTarget = null; // { x, y, z, ang } - letzte Lage vom Server (y = Bodenhöhe dort)
 let robotRunItem = null; // Eintrag in runEls für das Schild des Roboters
 let robotGroup = null;
 let robotRing = null;
@@ -3724,7 +3745,7 @@ function renderRunLabels() {
   robotRunItem = null;
   const robotContent = robotLabelContent();
   if (robotContent && robotPose) {
-    robotRunItem = { el: makeRunEl(robotContent), x: robotPose.x, y: FLOOR_TOP_M + 0.45, z: robotPose.z };
+    robotRunItem = { el: makeRunEl(robotContent), x: robotPose.x, y: robotPose.y + 0.4, z: robotPose.z };
     runEls.push(robotRunItem);
   }
   for (const p of props) {
@@ -3850,7 +3871,7 @@ function updateRobotTrail(points) {
     scene.add(robotTrail);
   }
   const half = 0.025;
-  const y = FLOOR_TOP_M + 0.045; // über Bodenplanken (ca. +0,022) und Teppichen (ca. +0,035)
+  const lift = 0.03; // über Bodenplanken und dünnen Teppichen
   const positions = [];
   for (let i = 1; i < pts.length; i++) {
     const [ax, az] = pts[i - 1];
@@ -3859,7 +3880,9 @@ function updateRobotTrail(points) {
     if (len < 0.01 || len > 3) continue; // Sprünge (z. B. Neu-Lokalisierung) nicht als Strich zeichnen
     const nx = (-(bz - az) / len) * half;
     const nz = ((bx - ax) / len) * half;
-    positions.push(ax + nx, y, az + nz, ax - nx, y, az - nz, bx + nx, y, bz + nz, ax - nx, y, az - nz, bx - nx, y, bz - nz, bx + nx, y, bz + nz);
+    const ay = floorYAt(ax, az) + lift;
+    const by = floorYAt(bx, bz) + lift;
+    positions.push(ax + nx, ay, az + nz, ax - nx, ay, az - nz, bx + nx, by, bz + nz, ax - nx, ay, az - nz, bx - nx, by, bz - nz, bx + nx, by, bz + nz);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -3891,10 +3914,11 @@ function robotLabelContent() {
 
 function applyRobotPose() {
   if (!robotGroup || !robotPose) return;
-  robotGroup.position.set(robotPose.x, FLOOR_TOP_M + 0.04, robotPose.z); // steht auf Planken/Teppich, nicht darin
+  robotGroup.position.set(robotPose.x, robotPose.y, robotPose.z);
   robotGroup.rotation.y = -robotPose.ang;
   if (robotRunItem) {
     robotRunItem.x = robotPose.x;
+    robotRunItem.y = robotPose.y + 0.4;
     robotRunItem.z = robotPose.z;
   }
 }
@@ -3906,14 +3930,16 @@ function tickRobot(now) {
   if (!robotGroup || !robotGroup.visible || !robotTarget || !robotPose) return false;
   const dx = robotTarget.x - robotPose.x;
   const dz = robotTarget.z - robotPose.z;
+  const dy = robotTarget.y - robotPose.y;
   let da = robotTarget.ang - robotPose.ang;
   da = Math.atan2(Math.sin(da), Math.cos(da)); // kürzester Weg
-  if (Math.abs(dx) < 0.002 && Math.abs(dz) < 0.002 && Math.abs(da) < 0.01) return false;
+  if (Math.abs(dx) < 0.002 && Math.abs(dz) < 0.002 && Math.abs(dy) < 0.002 && Math.abs(da) < 0.01) return false;
   if (Math.hypot(dx, dz) > 2) {
     robotPose = { ...robotTarget }; // große Sprünge (Neu-Lokalisierung, Seite neu geöffnet): nicht durch die Wände gleiten
   } else {
     const k = 1 - Math.exp(-dt / 1.2);
     robotPose.x += dx * k;
+    robotPose.y += dy * k;
     robotPose.z += dz * k;
     robotPose.ang += da * k;
   }
@@ -3929,7 +3955,11 @@ function applyRobot(data) {
   if (robotGroup) {
     robotGroup.visible = Boolean(plan && robot);
     if (plan && robot) {
-      robotTarget = { x: plan.x, z: plan.z, ang: Math.atan2(plan.heading[1], plan.heading[0]) };
+      // in der Station steht der Roboter auf deren Auffahrplatte (Höhe an der Dock-Stelle), sonst auf dem Boden
+      const cal = data.calibration || {};
+      // (Auffahrplatte der Station liegt ca. 3,5 cm über dem Boden an der Dock-Stelle, siehe scripts/seed_ecovacs_station.py)
+      const y = robot.state === "docked" && cal.dock_x != null ? floorYAt(cal.dock_x, cal.dock_z) + 0.035 : floorYAt(plan.x, plan.z) + 0.02;
+      robotTarget = { x: plan.x, y, z: plan.z, ang: Math.atan2(plan.heading[1], plan.heading[0]) };
       if (!robotPose) robotPose = { ...robotTarget };
       const color = robot.stale ? 0x7a828a : ROBOT_STATE_COLORS[robot.state] ?? 0xb0b8c0;
       robotRing.material.color.setHex(color);
