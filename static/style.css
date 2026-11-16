@@ -1835,3 +1835,12 @@ button.danger-link {
 .fp-robot #fpRobotCountry {
   flex: 0 0 38%;
 }
+
+/* Statusanzeige des Saugroboters: fest am linken Bildrand unter den Knöpfen (nicht am Roboter) */
+.fp-run.fp-robot-status {
+  left: 12px;
+  top: 56px;
+  transform: none;
+  text-align: left;
+  min-width: 120px;
+}

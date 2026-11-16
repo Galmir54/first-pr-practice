@@ -3774,11 +3774,9 @@ function renderRunLabels() {
   runLayer.replaceChildren();
   runEls = [];
   robotRunItem = null;
+  // Statusanzeige des Saugroboters: fest am linken Bildrand (nicht am Roboter), sie wandert nicht mit ihm mit
   const robotContent = robotLabelContent();
-  if (robotContent && robotPose) {
-    robotRunItem = { el: makeRunEl(robotContent), x: robotPose.x, y: robotPose.y + 0.4, z: robotPose.z };
-    runEls.push(robotRunItem);
-  }
+  if (robotContent) makeRunEl(robotContent).classList.add("fp-robot-status");
   for (const p of props) {
     if (p.device_id == null) continue;
     const content = runLabelContent(p);
