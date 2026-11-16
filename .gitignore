@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+data/
+.env
+
+# Private Grundriss-/3D-Modelldaten - nicht ins (öffentliche) Repo
+static/models/*.stl

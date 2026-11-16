@@ -1,0 +1,10 @@
+[Unit]
+Description=Prüft alle 5 Minuten auf Updates für das Energie-Dashboard
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=energy-dashboard-update.service
+
+[Install]
+WantedBy=timers.target
