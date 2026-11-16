@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from .. import anycubic, poller, runs, weather
+from .. import anycubic, ecovacs, poller, runs, weather
 from ..db import db_cursor
 
 router = APIRouter()
@@ -353,6 +353,12 @@ class AnycubicTokenIn(BaseModel):
 
 class AnycubicPrinterIn(BaseModel):
     printer_id: int | None = None
+
+
+@router.get("/robot/env")
+async def get_robot_env():
+    """Python-Umgebung des Servers (für die ECOVACS-Anbindung: braucht Python 3.14 für die Bibliothek)."""
+    return await asyncio.to_thread(ecovacs.environment)
 
 
 @router.get("/anycubic")
