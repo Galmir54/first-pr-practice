@@ -5,9 +5,9 @@ Rückseite an der Wand, Front nach Westen (-x). Der Roboter dockt in der Mitte d
 z 1,08 (= dock_x/dock_z der Kalibrierung in app/ecovacs.py). Maße ungefähr nach den Omni-Stationen (ca. 42 x 50 x 52 cm),
 nicht gemessen: untere Bucht mit Seitenwänden, darüber Wasserbehälter/Staubbeutel-Block mit Deckel.
 
-Bodenhöhe: Das 3D-Modell hat dort einen groben Bettklotz, der Boden steigt von z 0,7 (0,19 m) bis z 1,5 (0,36 m) an;
-an der Station ca. 0,27 m. Deshalb steht die Station auf einem Sockel (LIFT), der den Höhenunterschied zum Boden
-(FLOOR_TOP 0,10 m) ausgleicht; der Roboter folgt im Browser der echten Bodenhöhe.
+Bodenhöhe: Das 3D-Modell hatte dort durch einen groben Bettklotz einen schrägen "Boden" (bis 0,36 m); seit
+flattenFloor() in static/floorplan.js (16.11.) ist er eben (ca. 0,107 m), die Station steht direkt auf dem Boden
+(LIFT 0). Der Roboter folgt im Browser der echten Bodenhöhe.
 
 Aufruf: py -I scripts/seed_ecovacs_station.py http://host:8000   (ersetzt nur das eigene Prop)
 """
@@ -19,7 +19,7 @@ base = sys.argv[1].rstrip("/")
 
 XW = 1.305  # Rückseite an der Ostwand (Wand innen x 1,31)
 ZC = 1.08  # Mitte der Station entlang der Wand
-LIFT = 0.19  # Sockelhöhe über FLOOR_TOP (0,10 m): Oberkante des Sockels ca. 0,29 m = Boden an der Station + Reserve
+LIFT = 0.0  # Sockelhöhe über FLOOR_TOP (0,10 m); der Boden ist eben, also kein Sockel nötig
 
 parts = []
 
@@ -31,9 +31,10 @@ def box(u0, u1, d0, d1, y0, y1, mat="white"):
 
 
 W = 0.21  # halbe Breite
-# Sockel unter allem: füllt den Raum zwischen Boden und Auffahrplatte
-parts.append(dict(x0=round(XW - 0.505, 3), x1=round(XW, 3), z0=round(ZC - W, 3), z1=round(ZC + W, 3), y0=0.0,
-                  y1=round(LIFT, 3), mat="gray"))
+# Sockel unter allem (nur wenn der Boden wieder uneben sein sollte): füllt den Raum zwischen Boden und Auffahrplatte
+if LIFT > 0:
+    parts.append(dict(x0=round(XW - 0.505, 3), x1=round(XW, 3), z0=round(ZC - W, 3), z1=round(ZC + W, 3), y0=0.0,
+                      y1=round(LIFT, 3), mat="gray"))
 # Auffahrplatte und die Bucht, in die der Roboter fährt: Seitenwände und Rückwand
 box(-W, W, 0.0, 0.505, 0.0, 0.02, "gray")
 box(-W, -W + 0.03, 0.0, 0.435, 0.02, 0.15, "white")

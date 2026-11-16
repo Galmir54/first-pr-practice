@@ -241,6 +241,36 @@ function setRestColors(geometry) {
   attr.needsUpdate = true;
 }
 
+// Das Modell enthält grobe Möbelklötze (z. B. das Bett im Schlafzimmer), deren schräge Flächen als "Boden" gewertet werden
+// (aufwärts zeigend, im Mittel unter FLOOR_MAX_Y): der Boden stieg dort bis zu 0,3 m an. Schräge Boden-Dreiecke werden auf die
+// normale Bodenhöhe (Median der ebenen Boden-Dreiecke) gelegt; ebene Flächen (z. B. niedrige Stufen) bleiben unberührt.
+function flattenFloor(geometry) {
+  const pos = geometry.getAttribute("position");
+  const nor = geometry.getAttribute("normal");
+  const triCount = pos.count / 3;
+  const range = (t) => {
+    const y0 = pos.getY(t * 3);
+    const y1 = pos.getY(t * 3 + 1);
+    const y2 = pos.getY(t * 3 + 2);
+    return Math.max(y0, y1, y2) - Math.min(y0, y1, y2);
+  };
+  const flatYs = [];
+  for (let t = 0; t < triCount; t++) if (range(t) < 0.005 && pos.getY(t * 3) < 0.2) flatYs.push(pos.getY(t * 3));
+  if (!flatYs.length) return;
+  flatYs.sort((p, q) => p - q);
+  const base = flatYs[Math.floor(flatYs.length / 2)];
+  for (let t = 0; t < triCount; t++) {
+    if (range(t) < 0.004) continue;
+    for (let v = 0; v < 3; v++) {
+      const i = t * 3 + v;
+      if (pos.getY(i) > base) pos.setY(i, base);
+      nor.setXYZ(i, 0, 1, 0);
+    }
+  }
+  pos.needsUpdate = true;
+  nor.needsUpdate = true;
+}
+
 function buildModelGeometries(source, height) {
   const pos = source.getAttribute("position");
   const triCount = pos.count / 3;
@@ -383,6 +413,7 @@ function buildModelGeometries(source, height) {
   for (let t = 0; t < triCount; t++) (kind[t] === 1 ? floorTris : restTris).push(t);
 
   const floorGeometry = subsetGeometry(source, floorTris);
+  flattenFloor(floorGeometry);
 
   const restGeometry = buildRestGeometry(source, restTris, triColor, wallColor);
 
@@ -3957,8 +3988,8 @@ function applyRobot(data) {
     if (plan && robot) {
       // in der Station steht der Roboter auf deren Auffahrplatte (Höhe an der Dock-Stelle), sonst auf dem Boden
       const cal = data.calibration || {};
-      // (Auffahrplatte der Station liegt ca. 3,5 cm über dem Boden an der Dock-Stelle, siehe scripts/seed_ecovacs_station.py)
-      const y = robot.state === "docked" && cal.dock_x != null ? floorYAt(cal.dock_x, cal.dock_z) + 0.035 : floorYAt(plan.x, plan.z) + 0.02;
+      // (Auffahrplatte der Station liegt ca. 1,5 cm über dem Boden an der Dock-Stelle, siehe scripts/seed_ecovacs_station.py)
+      const y = robot.state === "docked" && cal.dock_x != null ? floorYAt(cal.dock_x, cal.dock_z) + 0.015 : floorYAt(plan.x, plan.z) + 0.02;
       robotTarget = { x: plan.x, y, z: plan.z, ang: Math.atan2(plan.heading[1], plan.heading[0]) };
       if (!robotPose) robotPose = { ...robotTarget };
       const color = robot.stale ? 0x7a828a : ROBOT_STATE_COLORS[robot.state] ?? 0xb0b8c0;
