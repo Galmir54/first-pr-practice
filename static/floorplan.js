@@ -903,7 +903,7 @@ function loadModel() {
       setHint(null);
 
       // Zugriff für spätere Erweiterungen (Marker für Lampen/Steckdosen/Temperatur) und zum Testen.
-      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture, get decor() { return decorGroup; }, get propObjs() { return propObjs; }, applyPropState, applySky, setTimeMode, setWeatherMode, setHeat, get skyState() { return skyState; } };
+      window.floorplan = { THREE, renderer, scene, camera, controls, bounds, requestRender, floorPointFromClient, furniture, get decor() { return decorGroup; }, get propObjs() { return propObjs; }, get robotGroup() { return robotGroup; }, applyRobot, stopRobot, applyPropState, applySky, setTimeMode, setWeatherMode, setHeat, get skyState() { return skyState; } };
     },
     undefined,
     () => {
@@ -1063,6 +1063,7 @@ function animate() {
   const now = performance.now();
   if (tickOpenings(now)) needsRender = true; // Tür/Fenster in Bewegung
   if (tickProps(now)) needsRender = true; // Trommeln laufender Geräte
+  if (tickRobot(now)) needsRender = true; // Saugroboter gleitet zur gemeldeten Lage
   const sceneChanged = moved || needsRender;
   // Regen/Schnee und das Schimmern der Statuswolken: nur das bewegt sich, Schatten bleiben
   const weatherMoved = tickWeather(now) | tickStatus(now);
@@ -3640,6 +3641,14 @@ const runLayer = document.createElement("div");
 runLayer.className = "fp-labels fp-runs";
 container.appendChild(runLayer);
 let runEls = []; // { el, x, y, z }
+// Saugroboter (ECOVACS): Daten vom Server, 3D-Teile, geglättete Anzeige-Lage und sein Schild (siehe weiter unten)
+let robotData = null;
+let robotPose = null; // { x, z, ang } - was gerade gezeichnet wird (folgt robotTarget weich)
+let robotTarget = null; // { x, z, ang } - letzte Lage vom Server
+let robotRunItem = null; // Eintrag in runEls für das Schild des Roboters
+let robotGroup = null;
+let robotRing = null;
+let robotTrail = null;
 
 const fmtDuration = (seconds) => {
   const m = Math.max(1, Math.round(seconds / 60));
@@ -3684,34 +3693,45 @@ function runLabelContent(p) {
   return { cls: "running", title, text, sub, progress: run.progress };
 }
 
+function makeRunEl(content) {
+  const el = document.createElement("div");
+  el.className = `fp-run ${content.cls}`;
+  const title = document.createElement("div");
+  title.className = "fp-run-title";
+  title.textContent = content.title;
+  const text = document.createElement("div");
+  text.className = "fp-run-text";
+  text.textContent = content.text;
+  const sub = document.createElement("div");
+  sub.className = "fp-run-sub";
+  sub.textContent = content.sub;
+  el.append(title, text, sub);
+  if (content.progress != null) {
+    const bar = document.createElement("div");
+    bar.className = "fp-run-bar";
+    const fill = document.createElement("i");
+    fill.style.width = `${Math.round(Math.min(1, Math.max(0, content.progress)) * 100)}%`;
+    bar.appendChild(fill);
+    el.appendChild(bar);
+  }
+  runLayer.appendChild(el);
+  return el;
+}
+
 function renderRunLabels() {
   runLayer.replaceChildren();
   runEls = [];
+  robotRunItem = null;
+  const robotContent = robotLabelContent();
+  if (robotContent && robotPose) {
+    robotRunItem = { el: makeRunEl(robotContent), x: robotPose.x, y: FLOOR_TOP_M + 0.45, z: robotPose.z };
+    runEls.push(robotRunItem);
+  }
   for (const p of props) {
     if (p.device_id == null) continue;
     const content = runLabelContent(p);
     if (!content) continue;
-    const el = document.createElement("div");
-    el.className = `fp-run ${content.cls}`;
-    const title = document.createElement("div");
-    title.className = "fp-run-title";
-    title.textContent = content.title;
-    const text = document.createElement("div");
-    text.className = "fp-run-text";
-    text.textContent = content.text;
-    const sub = document.createElement("div");
-    sub.className = "fp-run-sub";
-    sub.textContent = content.sub;
-    el.append(title, text, sub);
-    if (content.progress != null) {
-      const bar = document.createElement("div");
-      bar.className = "fp-run-bar";
-      const fill = document.createElement("i");
-      fill.style.width = `${Math.round(Math.min(1, Math.max(0, content.progress)) * 100)}%`;
-      bar.appendChild(fill);
-      el.appendChild(bar);
-    }
-    runLayer.appendChild(el);
+    const el = makeRunEl(content);
     // Lage: Mitte der Teile, Richtung Raumschild versetzt, damit nebeneinander stehende Geräte sich nicht überdecken
     let x0 = Infinity;
     let x1 = -Infinity;
@@ -3779,6 +3799,310 @@ function updateRunPositions() {
     item.el.style.top = `${cy + best.dy}px`;
     placed.push(best.rect);
   }
+}
+
+// ---- ECOVACS-Saugroboter: Roboter und Spur im Plan, Schild, Anmeldung ----
+const ROBOT_POLL_MS = 3000;
+const ROBOT_HELP =
+  "Meldet sich mit deinem ECOVACS-Konto an. Das Passwort wird nicht gespeichert, nur ein Zugang, der auf dem Pi bleibt. Beim ersten Mal schickt ECOVACS einen Code per E-Mail.";
+const ROBOT_STATE_COLORS = { cleaning: 0x4cb8ff, returning: 0xffb347, docked: 0x39ff9d, paused: 0xffd24a, error: 0xff4d4d, idle: 0xb0b8c0 };
+let robotTimer = null;
+let robotLastTick = 0;
+
+function ensureRobotMeshes() {
+  if (robotGroup || !scene) return;
+  const white = new THREE.MeshStandardMaterial({ color: 0xdde1e5, roughness: 0.45 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2c3036, roughness: 0.5, side: THREE.DoubleSide });
+  robotGroup = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.085, 40), white);
+  body.position.y = 0.0425;
+  // dunkler Sockelrand: hebt den hellen Roboter vom hellen Boden ab
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.176, 0.176, 0.03, 40), dark);
+  skirt.position.y = 0.015;
+  body.castShadow = true; // (kein receiveShadow: die flache Oberseite bekäme sonst Schattenmuster vom eigenen Schatten)
+  // Stoßfänger vorn (Vorderseite = +x des Roboters; im three.js-Zylinder liegt Winkel 0 auf +z)
+  const bumper = new THREE.Mesh(new THREE.CylinderGeometry(0.173, 0.173, 0.045, 20, 1, true, Math.PI / 2 - 0.85, 1.7), dark);
+  bumper.position.y = 0.04;
+  const lidar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.025, 24), dark);
+  lidar.position.set(0.02, 0.0975, 0);
+  robotRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.095, 0.12, 40),
+    new THREE.MeshBasicMaterial({ color: 0xb0b8c0, side: THREE.DoubleSide, toneMapped: false })
+  );
+  robotRing.rotation.x = -Math.PI / 2;
+  robotRing.position.set(0.02, 0.0865, 0);
+  robotGroup.add(body, skirt, bumper, lidar, robotRing);
+  robotGroup.visible = false;
+  scene.add(robotGroup);
+}
+
+// Spur des laufenden Reinigungslaufs als flaches Band auf dem Boden
+function updateRobotTrail(points) {
+  if (!scene) return;
+  const pts = points || [];
+  if (!robotTrail) {
+    robotTrail = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({ color: 0x4cb8ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, toneMapped: false })
+    );
+    robotTrail.renderOrder = 5;
+    robotTrail.frustumCulled = false;
+    scene.add(robotTrail);
+  }
+  const half = 0.025;
+  const y = FLOOR_TOP_M + 0.045; // über Bodenplanken (ca. +0,022) und Teppichen (ca. +0,035)
+  const positions = [];
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1];
+    const [bx, bz] = pts[i];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len < 0.01 || len > 3) continue; // Sprünge (z. B. Neu-Lokalisierung) nicht als Strich zeichnen
+    const nx = (-(bz - az) / len) * half;
+    const nz = ((bx - ax) / len) * half;
+    positions.push(ax + nx, y, az + nz, ax - nx, y, az - nz, bx + nx, y, bz + nz, ax - nx, y, az - nz, bx - nx, y, bz - nz, bx + nx, y, bz + nz);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  robotTrail.geometry.dispose();
+  robotTrail.geometry = geometry;
+  robotTrail.visible = positions.length > 0;
+}
+
+function robotLabelContent() {
+  const r = robotData && robotData.plan && robotData.robot;
+  if (!r) return null;
+  const names = { cleaning: "Reinigt", returning: "Fährt zur Station", docked: "In der Station", paused: "Pausiert", error: "Störung", idle: "Bereit" };
+  let text = names[r.state] || "Status unbekannt";
+  if (r.state === "docked" && r.battery != null && r.battery < 100) text = "Lädt";
+  if (r.state === "error" && r.error) text = r.error.text ? `Störung: ${r.error.text}` : `Störung ${r.error.code}`;
+  if (r.stale) text = "keine aktuelle Meldung";
+  const parts = [];
+  if (r.battery != null) parts.push(`${r.battery} %`);
+  if (r.area) parts.push(`${r.area} m²`);
+  if (r.time) parts.push(fmtDuration(r.time));
+  return {
+    cls: r.state === "docked" || r.state === "idle" ? "done" : "running",
+    title: "Saugroboter",
+    text,
+    sub: parts.join(" · ") || "laut ECOVACS-Cloud",
+    progress: r.battery != null ? r.battery / 100 : null,
+  };
+}
+
+function applyRobotPose() {
+  if (!robotGroup || !robotPose) return;
+  robotGroup.position.set(robotPose.x, FLOOR_TOP_M + 0.04, robotPose.z); // steht auf Planken/Teppich, nicht darin
+  robotGroup.rotation.y = -robotPose.ang;
+  if (robotRunItem) {
+    robotRunItem.x = robotPose.x;
+    robotRunItem.z = robotPose.z;
+  }
+}
+
+// Läuft pro Bild: lässt den Roboter weich zur letzten gemeldeten Lage gleiten. true = es bewegt sich (neu zeichnen).
+function tickRobot(now) {
+  const dt = robotLastTick ? Math.min(0.2, (now - robotLastTick) / 1000) : 0;
+  robotLastTick = now;
+  if (!robotGroup || !robotGroup.visible || !robotTarget || !robotPose) return false;
+  const dx = robotTarget.x - robotPose.x;
+  const dz = robotTarget.z - robotPose.z;
+  let da = robotTarget.ang - robotPose.ang;
+  da = Math.atan2(Math.sin(da), Math.cos(da)); // kürzester Weg
+  if (Math.abs(dx) < 0.002 && Math.abs(dz) < 0.002 && Math.abs(da) < 0.01) return false;
+  if (Math.hypot(dx, dz) > 2) {
+    robotPose = { ...robotTarget }; // große Sprünge (Neu-Lokalisierung, Seite neu geöffnet): nicht durch die Wände gleiten
+  } else {
+    const k = 1 - Math.exp(-dt / 1.2);
+    robotPose.x += dx * k;
+    robotPose.z += dz * k;
+    robotPose.ang += da * k;
+  }
+  applyRobotPose();
+  return true;
+}
+
+function applyRobot(data) {
+  robotData = data;
+  ensureRobotMeshes();
+  const plan = data && data.plan;
+  const robot = data && data.robot;
+  if (robotGroup) {
+    robotGroup.visible = Boolean(plan && robot);
+    if (plan && robot) {
+      robotTarget = { x: plan.x, z: plan.z, ang: Math.atan2(plan.heading[1], plan.heading[0]) };
+      if (!robotPose) robotPose = { ...robotTarget };
+      const color = robot.stale ? 0x7a828a : ROBOT_STATE_COLORS[robot.state] ?? 0xb0b8c0;
+      robotRing.material.color.setHex(color);
+      applyRobotPose();
+    } else {
+      robotPose = null;
+      robotTarget = null;
+    }
+  }
+  updateRobotTrail(data && data.trail);
+  renderRunLabels();
+  renderRobotSettings(data);
+  requestRender();
+}
+
+async function robotRequest(method, path, body) {
+  try {
+    const res = await fetch(`/api/floorplan/robot${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store",
+    });
+    if (res.ok) return await res.json();
+    if (res.status === 409) {
+      const detail = await res.json().catch(() => ({}));
+      return { error: detail.detail || "nicht möglich" };
+    }
+  } catch {
+    /* Server nicht erreichbar */
+  }
+  return null;
+}
+
+async function loadRobot() {
+  const data = await robotRequest("GET", "");
+  if (data && !data.error) applyRobot(data);
+}
+
+const robotEl = {
+  status: document.getElementById("fpRobotStatus"),
+  login: document.getElementById("fpRobotLogin"),
+  email: document.getElementById("fpRobotEmail"),
+  password: document.getElementById("fpRobotPassword"),
+  country: document.getElementById("fpRobotCountry"),
+  loginBtn: document.getElementById("fpRobotLoginBtn"),
+  verify: document.getElementById("fpRobotVerify"),
+  code: document.getElementById("fpRobotCode"),
+  verifyBtn: document.getElementById("fpRobotVerifyBtn"),
+  resend: document.getElementById("fpRobotResend"),
+  extra: document.getElementById("fpRobotExtra"),
+  device: document.getElementById("fpRobotDevice"),
+  retry: document.getElementById("fpRobotRetry"),
+  remove: document.getElementById("fpRobotRemove"),
+  cal: document.getElementById("fpRobotCal"),
+  calInfo: document.getElementById("fpRobotCalInfo"),
+  help: document.getElementById("fpRobotHelp"),
+};
+
+function renderRobotSettings(data) {
+  if (!data) {
+    robotEl.status.textContent = "nicht erreichbar";
+    return;
+  }
+  const device = (data.devices || []).find((d) => d.did === data.selected);
+  const texts = {
+    not_configured: "nicht eingerichtet",
+    installing: `richtet ein: ${data.message}`,
+    login: "meldet an …",
+    verify_required: "Code aus der E-Mail eingeben",
+    connecting: "sucht den Roboter …",
+    ok: device ? `verbunden · ${device.name || device.model}` : "verbunden",
+    auth_failed: data.message || "Anmeldung fehlgeschlagen",
+    error: `Fehler: ${data.message || "unbekannt"}`,
+  };
+  robotEl.status.textContent = (texts[data.status] || data.status) + (data.simulate ? " (Simulation)" : "");
+  robotEl.status.dataset.state = data.status;
+  const showLogin = data.status === "not_configured" || data.status === "auth_failed";
+  robotEl.login.classList.toggle("hidden", !showLogin);
+  robotEl.verify.classList.toggle("hidden", data.status !== "verify_required");
+  // Hilfetext: beim Code-Schritt die Meldung von ECOVACS, sonst die allgemeine Erklärung (nur vor der Anmeldung)
+  if (data.status === "verify_required" && data.message) robotEl.help.textContent = data.message;
+  else robotEl.help.textContent = ROBOT_HELP;
+  robotEl.help.classList.toggle("hidden", data.status === "ok");
+  robotEl.extra.classList.toggle("hidden", !data.configured);
+  robotEl.retry.classList.toggle("hidden", data.status !== "error");
+  const devices = (data.devices || []).filter((d) => d.supported);
+  robotEl.device.replaceChildren();
+  for (const d of devices) {
+    const option = document.createElement("option");
+    option.value = d.did;
+    option.textContent = d.name || d.model || d.did;
+    option.selected = d.did === data.selected;
+    robotEl.device.appendChild(option);
+  }
+  robotEl.device.classList.toggle("hidden", devices.length < 2);
+  robotEl.email.placeholder = data.email || "E-Mail des ECOVACS-Kontos";
+  if (data.country) robotEl.country.value = data.country;
+  const cal = data.calibration;
+  robotEl.cal.classList.toggle("hidden", data.status !== "ok");
+  if (cal) {
+    robotEl.calInfo.textContent = `Karte: ${Math.round(cal.rot)}° gedreht${cal.flip_y ? "" : " · nicht gespiegelt"} · Maßstab ${Math.round(cal.scale * 1000 * 100) / 100} (1 = Millimeter). Mit dem ersten Reinigungslauf prüfen, ob die blaue Spur in den Räumen bleibt, sonst hier ausrichten.`;
+  }
+}
+
+async function robotCalibrate(change) {
+  const data = await robotRequest("PUT", "/calibration", change);
+  if (data && !data.error) applyRobot(data);
+}
+
+robotEl.loginBtn.addEventListener("click", async () => {
+  const email = robotEl.email.value.trim();
+  const password = robotEl.password.value;
+  if (!email || !password) {
+    robotEl.status.textContent = "E-Mail und Passwort eintragen";
+    return;
+  }
+  robotEl.status.textContent = "meldet an …";
+  const data = await robotRequest("PUT", "/login", { email, password, country: robotEl.country.value });
+  robotEl.password.value = ""; // das Passwort bleibt nicht im Browser
+  if (data && !data.error) applyRobot(data);
+});
+robotEl.verifyBtn.addEventListener("click", async () => {
+  const code = robotEl.code.value.trim();
+  if (code.length < 4) return;
+  const data = await robotRequest("PUT", "/verify", { code });
+  robotEl.code.value = "";
+  if (data && data.error) robotEl.help.textContent = data.error;
+  else if (data) applyRobot(data);
+});
+robotEl.resend.addEventListener("click", async () => {
+  const data = await robotRequest("POST", "/resend");
+  if (data && data.error) robotEl.help.textContent = data.error;
+});
+robotEl.device.addEventListener("change", async () => {
+  const data = await robotRequest("PUT", "/device", { did: robotEl.device.value });
+  if (data && !data.error) applyRobot(data);
+});
+robotEl.retry.addEventListener("click", async () => {
+  const data = await robotRequest("POST", "/retry");
+  if (data && !data.error) applyRobot(data);
+});
+robotEl.remove.addEventListener("click", async () => {
+  if (!window.confirm("Saugroboter-Zugang vom Pi löschen?")) return;
+  robotPose = null;
+  const data = await robotRequest("DELETE", "");
+  if (data && !data.error) applyRobot(data);
+});
+document.getElementById("fpRobotRot").addEventListener("click", () => {
+  const cal = robotData && robotData.calibration;
+  if (cal) robotCalibrate({ rot: (Math.round(cal.rot) + 90) % 360 });
+});
+document.getElementById("fpRobotFlip").addEventListener("click", () => {
+  const cal = robotData && robotData.calibration;
+  if (cal) robotCalibrate({ flip_y: !cal.flip_y });
+});
+document.getElementById("fpRobotScaleDown").addEventListener("click", () => {
+  const cal = robotData && robotData.calibration;
+  if (cal) robotCalibrate({ scale: Math.max(0.00025, cal.scale / 2) });
+});
+document.getElementById("fpRobotScaleUp").addEventListener("click", () => {
+  const cal = robotData && robotData.calibration;
+  if (cal) robotCalibrate({ scale: Math.min(0.009, cal.scale * 2) });
+});
+
+function startRobot() {
+  loadRobot();
+  if (robotTimer === null) robotTimer = setInterval(loadRobot, ROBOT_POLL_MS);
+}
+
+function stopRobot() {
+  if (robotTimer !== null) clearInterval(robotTimer);
+  robotTimer = null;
 }
 
 // ---- Anycubic-Cloud (Token eintragen, Status) ----
@@ -3878,6 +4202,7 @@ function startViewer() {
   }
   if (!renderer) return;
   startSky();
+  startRobot();
   loadRooms(); // bei jedem Öffnen neu holen, damit Änderungen von anderen Geräten sichtbar sind
   loadCabinets();
   loadTvs();
@@ -3917,6 +4242,7 @@ function stopViewer() {
     tvTimer = null;
   }
   stopSky();
+  stopRobot();
   closeTempDialog();
 }
 

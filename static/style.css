@@ -1808,3 +1808,30 @@ button.danger-link {
   color: var(--text);
   word-break: break-all;
 }
+
+/* Saugroboter (ECOVACS) im Einstellungsfenster */
+.fp-robot-login,
+.fp-robot-cal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fp-robot-login.hidden,
+.fp-robot-cal.hidden,
+.fp-robot .fp-btn.hidden {
+  display: none;
+}
+
+.fp-robot .fp-cloud-row .fp-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.fp-robot-login .fp-cloud-row .fp-btn {
+  flex: 1 1 auto;
+}
+
+.fp-robot #fpRobotCountry {
+  flex: 0 0 38%;
+}

@@ -196,6 +196,59 @@
           </div>
           <div class="fp-cloud-help">Token holen: auf cloud-universe.anycubic.com anmelden, F12 &rarr; Konsole &rarr; <code>window.localStorage["XX-Token"]</code> eingeben und das Ergebnis kopieren. Er wird nur auf dem Pi gespeichert.</div>
         </div>
+        <div class="fp-cloud fp-robot">
+          <div class="fp-cloud-head">
+            <span class="fp-slider-label">Saugroboter</span>
+            <span class="fp-cloud-status" id="fpRobotStatus">nicht eingerichtet</span>
+          </div>
+          <div class="fp-robot-login" id="fpRobotLogin">
+            <div class="fp-cloud-row">
+              <input type="email" id="fpRobotEmail" placeholder="E-Mail des ECOVACS-Kontos" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="fp-cloud-row">
+              <input type="password" id="fpRobotPassword" placeholder="Passwort" autocomplete="off" />
+              <select id="fpRobotCountry" title="Land des ECOVACS-Kontos">
+                <option value="DE">Deutschland</option>
+                <option value="AT">Österreich</option>
+                <option value="CH">Schweiz</option>
+                <option value="NL">Niederlande</option>
+                <option value="BE">Belgien</option>
+                <option value="FR">Frankreich</option>
+                <option value="IT">Italien</option>
+                <option value="ES">Spanien</option>
+                <option value="PL">Polen</option>
+                <option value="DK">Dänemark</option>
+                <option value="GB">Großbritannien</option>
+              </select>
+            </div>
+            <div class="fp-cloud-row">
+              <button class="fp-btn" id="fpRobotLoginBtn">Anmelden</button>
+            </div>
+          </div>
+          <div class="fp-cloud-row hidden" id="fpRobotVerify">
+            <input type="text" id="fpRobotCode" inputmode="numeric" placeholder="Code aus der E-Mail" autocomplete="off" />
+            <button class="fp-btn" id="fpRobotVerifyBtn">Bestätigen</button>
+            <button class="fp-btn" id="fpRobotResend" title="Code erneut senden">↻</button>
+          </div>
+          <div class="fp-cloud-row hidden" id="fpRobotExtra">
+            <select id="fpRobotDevice"></select>
+            <button class="fp-btn hidden" id="fpRobotRetry">Neu versuchen</button>
+            <button class="fp-btn" id="fpRobotRemove">Entfernen</button>
+          </div>
+          <div class="fp-robot-cal hidden" id="fpRobotCal">
+            <span class="fp-cloud-help" id="fpRobotCalInfo"></span>
+            <div class="fp-cloud-row">
+              <button class="fp-btn" id="fpRobotRot" title="Roboter-Karte um 90° drehen">⟳ 90°</button>
+              <button class="fp-btn" id="fpRobotFlip" title="Roboter-Karte spiegeln">⇋ Spiegeln</button>
+              <button class="fp-btn" id="fpRobotScaleDown" title="Karte kleiner (Maßstab halbieren)">−</button>
+              <button class="fp-btn" id="fpRobotScaleUp" title="Karte größer (Maßstab verdoppeln)">+</button>
+            </div>
+          </div>
+          <div class="fp-cloud-help" id="fpRobotHelp">
+            Meldet sich mit deinem ECOVACS-Konto an. Das Passwort wird nicht gespeichert, nur ein Zugang, der auf dem Pi bleibt.
+            Beim ersten Mal schickt ECOVACS einen Code per E-Mail.
+          </div>
+        </div>
         <label class="fp-slider">
           <span class="fp-slider-label">Schilder</span>
           <input type="range" id="fpLabelScale" min="0.6" max="1.8" step="0.05" value="1" />

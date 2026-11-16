@@ -355,10 +355,88 @@ class AnycubicPrinterIn(BaseModel):
     printer_id: int | None = None
 
 
+class RobotLoginIn(BaseModel):
+    email: str = Field(min_length=3, max_length=120, pattern=r"^[^\s@]+@[^\s@]+$")
+    password: str = Field(min_length=1, max_length=200)
+    country: str = Field(default="DE", pattern="^[A-Za-z]{2}$")
+
+
+class RobotVerifyIn(BaseModel):
+    code: str = Field(min_length=4, max_length=12)
+
+
+class RobotDeviceIn(BaseModel):
+    did: str = Field(min_length=1, max_length=120)
+
+
+class RobotCalibrationIn(BaseModel):
+    """Lage der Ladestation im Plan und Umrechnung der Roboter-Karte (alles optional, nur Angegebenes ändert sich)."""
+
+    dock_x: float | None = Field(default=None, ge=-20, le=20)
+    dock_z: float | None = Field(default=None, ge=-20, le=20)
+    rot: float | None = Field(default=None, ge=-360, le=360)
+    flip_y: bool | None = None
+    scale: float | None = Field(default=None, gt=0.0001, lt=0.01)
+
+
 @router.get("/robot/env")
 async def get_robot_env():
     """Python-Umgebung des Servers (für die ECOVACS-Anbindung: braucht Python 3.14 für die Bibliothek)."""
     return await asyncio.to_thread(ecovacs.environment)
+
+
+@router.get("/robot")
+async def get_robot():
+    """Zustand des ECOVACS-Saugroboters: Verbindung, Akku, Position im Plan (nie Passwort oder Zugang)."""
+    return await asyncio.to_thread(ecovacs.public_state)
+
+
+@router.put("/robot/login")
+async def put_robot_login(body: RobotLoginIn):
+    """Meldet sich mit dem ECOVACS-Konto an. Das Passwort wird nicht gespeichert, nur der daraus gewonnene Zugang."""
+    await asyncio.to_thread(ecovacs.login, body.email, body.password, body.country)
+    await asyncio.sleep(1.0)  # kurz warten, damit das Einstellungsfenster schon den ersten Status sieht
+    return await asyncio.to_thread(ecovacs.public_state)
+
+
+@router.put("/robot/verify")
+async def put_robot_verify(body: RobotVerifyIn):
+    """Bestätigungscode aus der E-Mail von ECOVACS (nötig, wenn ECOVACS das Gerät neu bestätigen will)."""
+    if not ecovacs.verify(body.code):
+        raise HTTPException(409, "Es läuft gerade keine Anmeldung, die einen Code braucht")
+    await asyncio.sleep(2.0)
+    return await asyncio.to_thread(ecovacs.public_state)
+
+
+@router.post("/robot/resend")
+async def post_robot_resend():
+    if not ecovacs.resend_code():
+        raise HTTPException(409, "Es läuft gerade keine Anmeldung, die einen Code braucht")
+    return await asyncio.to_thread(ecovacs.public_state)
+
+
+@router.put("/robot/device")
+async def put_robot_device(body: RobotDeviceIn):
+    await asyncio.to_thread(ecovacs.select_device, body.did)
+    return await asyncio.to_thread(ecovacs.public_state)
+
+
+@router.put("/robot/calibration")
+async def put_robot_calibration(body: RobotCalibrationIn):
+    await asyncio.to_thread(ecovacs.set_calibration, body.model_dump(exclude_none=True))
+    return await asyncio.to_thread(ecovacs.public_state)
+
+
+@router.post("/robot/retry")
+async def post_robot_retry():
+    ecovacs.retry()
+    return await asyncio.to_thread(ecovacs.public_state)
+
+
+@router.delete("/robot")
+async def delete_robot():
+    await asyncio.to_thread(ecovacs.remove)
+    return await asyncio.to_thread(ecovacs.public_state)
 
 
 @router.get("/anycubic")

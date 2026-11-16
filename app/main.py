@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import anycubic, config, db, heating, maintenance, waste
+from . import anycubic, config, db, ecovacs, heating, maintenance, waste
 from .poller import poller_loop
 from .routers import devices, readings, summary, tariff
 from .routers import floorplan as floorplan_router
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(waste.waste_loop()),
         asyncio.create_task(heating.heating_loop()),
         asyncio.create_task(anycubic.anycubic_loop()),
+        asyncio.create_task(ecovacs.ecovacs_loop()),
     ]
     yield
     maintenance.request_stop()
